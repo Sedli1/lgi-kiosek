@@ -399,9 +399,14 @@ export default function KioskPage() {
         </button>
 
         <div className="text-center mb-10">
-          <div className="text-white/70 text-sm uppercase tracking-widest mb-2">LGI Logistics</div>
-          <h1 className="text-white text-4xl font-bold mb-1">Vyberte jazyk</h1>
-          <p className="text-blue-200 text-lg">Select language / Sprache / Wybierz język</p>
+          <div className="text-white/60 text-xs uppercase tracking-widest mb-3">LGI Logistics · Driver Registration</div>
+          <h1 className="text-white text-5xl font-black mb-3">Vítejte!</h1>
+          <p className="text-blue-100 text-xl font-medium mb-1">Zaregistrujte se k vykládce nebo nakládce.</p>
+          <p className="text-blue-300 text-base">Prosím zvolte jazyk / Please select your language</p>
+          <div className="mt-4 text-blue-200/60 text-sm space-y-0.5">
+            <div>Witamy! Zarejestruj się do rozładunku.</div>
+            <div>Willkommen! Bitte melden Sie sich zur Be-/Entladung an.</div>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 w-full max-w-lg">
@@ -565,7 +570,7 @@ export default function KioskPage() {
             </label>
             <input
               value={values.name}
-              readOnly
+
               placeholder="Jan Novák"
               onFocus={() => openKb("name")}
               onChange={(e) => handleInputChange("name", e.target.value)}
@@ -596,7 +601,7 @@ export default function KioskPage() {
               </select>
               <input
                 value={values.phone}
-                readOnly
+  
                 placeholder="123 456 789"
                 onFocus={() => openKb("phone")}
                 onChange={(e) => handleInputChange("phone", e.target.value)}
@@ -615,7 +620,7 @@ export default function KioskPage() {
               </label>
               <input
                 value={values.spz}
-                readOnly
+  
                 placeholder="1AB 2345"
                 onFocus={() => openKb("spz")}
                 onChange={(e) => handleInputChange("spz", e.target.value)}
@@ -630,7 +635,7 @@ export default function KioskPage() {
               </label>
               <input
                 value={values.firm}
-                readOnly
+  
                 placeholder="Dopravní firma s.r.o."
                 onFocus={() => openKb("firm")}
                 onChange={(e) => handleInputChange("firm", e.target.value)}
@@ -645,7 +650,7 @@ export default function KioskPage() {
             <label className="block text-sm font-medium text-gray-600 mb-1">{t.order}</label>
             <input
               value={values.order}
-              readOnly
+
               placeholder="ORD-12345"
               onFocus={() => openKb("order")}
               onChange={(e) => handleInputChange("order", e.target.value)}
