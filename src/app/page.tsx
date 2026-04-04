@@ -1,146 +1,366 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import dynamic from "next/dynamic";
-import { LANGS, T, Lang } from "@/lib/i18n";
+import { T, Lang } from "@/lib/i18n";
 
-// Virtual keyboard — loaded only on client to avoid SSR issues
-const Keyboard = dynamic(() => import("react-simple-keyboard"), { ssr: false });
+// ── Types ─────────────────────────────────────────────────
 
-interface ConfirmData {
-  num: number;
-  confirmSms: string;
-}
+interface ConfirmData { num: number; confirmSms: string; }
+type FormField = "name" | "phone" | "spz" | "firm" | "order";
+type KbLayer = "default" | "shift" | "diak" | "num";
+type FormValues = Record<FormField, string>;
 
 const RESET_SECONDS = 90;
-
 const OFFLINE_QUEUE_KEY = "lgi-offline-queue";
 
-type FormValues = {
-  name: string;
-  phone: string;
-  spz: string;
-  firm: string;
-  order: string;
+// ── Language metadata ──────────────────────────────────────
+
+const LANG_META: Record<Lang, { name: string; dialCode: string }> = {
+  cs: { name: "Čeština",    dialCode: "+420" },
+  sk: { name: "Slovenčina", dialCode: "+421" },
+  pl: { name: "Polski",     dialCode: "+48"  },
+  de: { name: "Deutsch",    dialCode: "+49"  },
 };
 
+// ── Keyboard layouts ───────────────────────────────────────
+
+const KB_ROWS_DEFAULT = [
+  ["q","w","e","r","t","y","u","i","o","p"],
+  ["a","s","d","f","g","h","j","k","l"],
+  ["⇧","z","x","c","v","b","n","m","⌫"],
+  ["✱"," ","↵"],
+];
+
+const KB_ROWS_SHIFT = [
+  ["Q","W","E","R","T","Y","U","I","O","P"],
+  ["A","S","D","F","G","H","J","K","L"],
+  ["⇩","Z","X","C","V","B","N","M","⌫"],
+  ["✱"," ","↵"],
+];
+
+const KB_ROWS_NUM = [
+  ["1","2","3"],
+  ["4","5","6"],
+  ["7","8","9"],
+  ["+","0","⌫"],
+  ["↵"],
+];
+
+const DIAK_KEYS: Record<Lang, string[][]> = {
+  cs: [
+    ["á","č","ď","é","ě","í","ň","ó","ř","š"],
+    ["ť","ú","ů","ý","ž","Á","Č","Š","Ž","Ř"],
+    [".","!","?",",","-","_","@","0","1","⌫"],
+    ["ABC"," ","↵"],
+  ],
+  sk: [
+    ["á","ä","č","ď","é","í","ĺ","ľ","ň","ó"],
+    ["ô","ŕ","š","ť","ú","ý","ž","Á","Š","Ž"],
+    [".","!","?",",","-","_","@","0","1","⌫"],
+    ["ABC"," ","↵"],
+  ],
+  pl: [
+    ["ą","ć","ę","ł","ń","ó","ś","ź","ż","Ą"],
+    ["Ć","Ę","Ł","Ń","Ó","Ś","Ź","Ż","@","-"],
+    [".","!","?",",","_","0","1","2","3","⌫"],
+    ["ABC"," ","↵"],
+  ],
+  de: [
+    ["ä","ö","ü","ß","Ä","Ö","Ü","@","-","_"],
+    [".","!","?",",",":","(",")",'"',"'","⌫"],
+    ["1","2","3","4","5","6","7","8","9","0"],
+    ["ABC"," ","↵"],
+  ],
+};
+
+// ── Flag SVGs ─────────────────────────────────────────────
+
+function FlagIcon({ code, size = 40 }: { code: string; size?: number }) {
+  const h = Math.round(size * 0.667);
+  const flags: Record<string, React.ReactNode> = {
+    cs: (
+      <svg width={size} height={h} viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg">
+        <rect width="3" height="1" fill="#fff"/>
+        <rect y="1" width="3" height="1" fill="#D7141A"/>
+        <polygon points="0,0 1.5,1 0,2" fill="#11457E"/>
+      </svg>
+    ),
+    sk: (
+      <svg width={size} height={h} viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg">
+        <rect width="3" height="0.667" fill="#fff"/>
+        <rect y="0.667" width="3" height="0.667" fill="#0B4EA2"/>
+        <rect y="1.333" width="3" height="0.667" fill="#EE1C25"/>
+        <rect x="0.2" y="0.3" width="0.25" height="0.9" fill="#fff"/>
+        <rect x="0.075" y="0.625" width="0.5" height="0.25" fill="#fff"/>
+      </svg>
+    ),
+    pl: (
+      <svg width={size} height={h} viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg">
+        <rect width="3" height="1" fill="#fff"/>
+        <rect y="1" width="3" height="1" fill="#DC143C"/>
+      </svg>
+    ),
+    de: (
+      <svg width={size} height={h} viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg">
+        <rect width="3" height="0.667" fill="#000"/>
+        <rect y="0.667" width="3" height="0.667" fill="#DD0000"/>
+        <rect y="1.333" width="3" height="0.667" fill="#FFCE00"/>
+      </svg>
+    ),
+  };
+  return (
+    <span className="rounded overflow-hidden inline-flex border border-black/10 flex-shrink-0">
+      {flags[code] ?? null}
+    </span>
+  );
+}
+
+// ── Custom virtual keyboard ───────────────────────────────
+
+function VirtualKeyboard({
+  layer,
+  lang,
+  onChar,
+  onBackspace,
+  onEnter,
+  onSpace,
+  onToggleShift,
+  onToggleDiak,
+  onClose,
+}: {
+  layer: KbLayer;
+  lang: Lang;
+  onChar: (c: string) => void;
+  onBackspace: () => void;
+  onEnter: () => void;
+  onSpace: () => void;
+  onToggleShift: () => void;
+  onToggleDiak: () => void;
+  onClose: () => void;
+}) {
+  const rows =
+    layer === "num"
+      ? KB_ROWS_NUM
+      : layer === "diak"
+      ? DIAK_KEYS[lang]
+      : layer === "shift"
+      ? KB_ROWS_SHIFT
+      : KB_ROWS_DEFAULT;
+
+  function handleKey(key: string) {
+    if (key === "⌫") { onBackspace(); return; }
+    if (key === "↵") { onEnter(); return; }
+    if (key === " ") { onSpace(); return; }
+    if (key === "⇧") { onToggleShift(); return; }
+    if (key === "⇩") { onToggleShift(); return; }
+    if (key === "✱" || key === "ABC") { onToggleDiak(); return; }
+    onChar(key);
+  }
+
+  function keyClass(key: string) {
+    const isWide = key === " " || key === "⇧" || key === "⇩" || key === "✱" || key === "ABC" || key === "↵";
+    const isAction = key === "⌫" || key === "↵" || key === "⇧" || key === "⇩" || key === "✱" || key === "ABC";
+    const isEnter = key === "↵";
+    const isSpace = key === " ";
+    const isShiftActive = layer === "shift" && (key === "⇩");
+    const isDiakActive = layer === "diak" && (key === "ABC");
+
+    return [
+      "flex items-center justify-center rounded-xl font-medium select-none active:scale-95 transition-transform cursor-pointer",
+      "h-14 min-w-[44px]",
+      isSpace ? "flex-[4]" : isWide ? "flex-[1.6]" : "flex-1",
+      isEnter ? "bg-[#065A82] text-white text-base shadow-md" :
+      isShiftActive || isDiakActive ? "bg-[#065A82] text-white shadow" :
+      isAction ? "bg-gray-300 text-gray-800 text-xl shadow" :
+      "bg-white text-gray-900 text-lg shadow",
+    ].join(" ");
+  }
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-200 border-t-2 border-gray-300 px-2 pt-2 pb-3 shadow-2xl">
+      <div className="flex justify-between items-center mb-1.5 px-1">
+        <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">
+          {layer === "num" ? "Čísla" : layer === "diak" ? "Diakritika" : "Klávesnice"}
+        </span>
+        <button
+          onMouseDown={(e) => { e.preventDefault(); onClose(); }}
+          className="text-xs text-gray-500 bg-gray-300 rounded px-2 py-0.5 hover:bg-gray-400"
+        >
+          Zavřít ✕
+        </button>
+      </div>
+      <div className="space-y-1.5 max-w-2xl mx-auto">
+        {rows.map((row, ri) => (
+          <div key={ri} className="flex gap-1.5 justify-center">
+            {row.map((key, ki) => (
+              <button
+                key={`${ri}-${ki}-${key}`}
+                onMouseDown={(e) => { e.preventDefault(); handleKey(key); }}
+                onTouchStart={(e) => { e.preventDefault(); handleKey(key); }}
+                className={keyClass(key)}
+              >
+                {key === " " ? "Mezera" : key}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Validation ────────────────────────────────────────────
+
+function validateField(field: FormField, value: string): string | null {
+  if (field === "name" && (!value || value.trim().length < 2)) return "Jméno musí mít alespoň 2 znaky";
+  if (field === "phone" && value.replace(/\D/g, "").length < 7) return "Neplatné číslo";
+  if (field === "spz" && (!value || value.trim().length < 2)) return "Neplatná SPZ";
+  if (field === "firm" && (!value || value.trim().length < 2)) return "Povinné pole";
+  return null;
+}
+
+// ── Main component ────────────────────────────────────────
+
 export default function KioskPage() {
-  const [lang, setLang] = useState<Lang>("cs");
+  const [lang, setLang] = useState<Lang | null>(null);
   const [confirmed, setConfirmed] = useState<ConfirmData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<FormValues>({ name: "", phone: "", spz: "", firm: "", order: "" });
+  const [dialCode, setDialCode] = useState("+420");
+  const [typeValue, setTypeValue] = useState("");
+  const [touched, setTouched] = useState<Set<FormField>>(new Set());
+  const [kbField, setKbField] = useState<FormField | null>(null);
+  const [kbLayer, setKbLayer] = useState<KbLayer>("default");
   const [countdown, setCountdown] = useState(RESET_SECONDS);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
-  const [showKb, setShowKb] = useState(false);
-  const [activeField, setActiveField] = useState<keyof FormValues | null>(null);
-  const [values, setValues] = useState<FormValues>({ name: "", phone: "", spz: "", firm: "", order: "" });
-  const [typeValue, setTypeValue] = useState("");
-  const keyboardRef = useRef<{ setInput: (val: string) => void } | null>(null);
+  const activeInputRef = useRef<HTMLInputElement | null>(null);
 
-  const t = T[lang];
+  const t = lang ? T[lang] : T.cs;
 
-  // Service worker registration
+  // Service worker
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
-      navigator.serviceWorker.addEventListener("message", (e) => {
-        if (e.data?.type === "flush-queue") flushOfflineQueue();
-      });
     }
     setIsOnline(navigator.onLine);
-    const onOnline = () => { setIsOnline(true); flushOfflineQueue(); };
-    const onOffline = () => setIsOnline(false);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
+    const on = () => { setIsOnline(true); flushOfflineQueue(); };
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
 
-  // Flush offline queue when back online
   const flushOfflineQueue = useCallback(async () => {
     const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
     if (!raw) return;
     const queue: object[] = JSON.parse(raw);
-    if (!queue.length) return;
     const remaining: object[] = [];
     for (const item of queue) {
       try {
-        const res = await fetch("/api/drivers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(item),
-        });
+        const res = await fetch("/api/drivers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
         if (!res.ok) remaining.push(item);
-      } catch {
-        remaining.push(item);
-      }
+      } catch { remaining.push(item); }
     }
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
   }, []);
 
-  // Fullscreen change listener
+  // Fullscreen listener
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", handler);
-    return () => document.removeEventListener("fullscreenchange", handler);
+    const h = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", h);
+    return () => document.removeEventListener("fullscreenchange", h);
   }, []);
 
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  }
-
-  // Auto-reset countdown after registration
+  // Auto-reset countdown
   useEffect(() => {
     if (!confirmed) return;
     setCountdown(RESET_SECONDS);
     const interval = setInterval(() => {
       setCountdown((s) => {
-        if (s <= 1) {
-          clearInterval(interval);
-          setConfirmed(null);
-          return RESET_SECONDS;
-        }
+        if (s <= 1) { clearInterval(interval); resetAll(); return RESET_SECONDS; }
         return s - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
   }, [confirmed]);
 
-  function validate() {
-    const errs: Record<string, string> = {};
-    if (!values.name) errs.name = t.required;
-    if (!values.phone) errs.phone = t.required;
-    if (!values.spz) errs.spz = t.required;
-    if (!values.firm) errs.firm = t.required;
-    if (!typeValue) errs.type = t.required;
-    return errs;
+  function resetAll() {
+    setConfirmed(null);
+    setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
+    setTypeValue("");
+    setTouched(new Set());
+    setKbField(null);
   }
 
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen().catch(() => {});
+  }
+
+  // When language changes, auto-set dial code
+  function selectLang(l: Lang) {
+    setLang(l);
+    setDialCode(LANG_META[l].dialCode);
+    setKbField(null);
+    setKbLayer("default");
+  }
+
+  // Keyboard handlers
+  function openKb(field: FormField) {
+    setKbField(field);
+    setKbLayer(field === "phone" ? "num" : "default");
+  }
+
+  function closeKb() { setKbField(null); }
+
+  function kbChar(c: string) {
+    if (!kbField) return;
+    setValues((v) => {
+      let next = v[kbField] + c;
+      if (kbField === "spz") next = next.toUpperCase();
+      return { ...v, [kbField]: next };
+    });
+    setTouched((t) => new Set(t).add(kbField));
+    if (kbLayer === "shift") setKbLayer("default"); // auto-return after one uppercase
+  }
+
+  function kbBackspace() {
+    if (!kbField) return;
+    setValues((v) => ({ ...v, [kbField]: v[kbField].slice(0, -1) }));
+  }
+
+  function kbEnter() { closeKb(); }
+  function kbSpace() { kbChar(" "); }
+  function kbToggleShift() { setKbLayer((l) => l === "shift" ? "default" : "shift"); }
+  function kbToggleDiak() { setKbLayer((l) => l === "diak" ? "default" : "diak"); }
+
+  // Direct input typing (hardware keyboard / native)
+  function handleInputChange(field: FormField, raw: string) {
+    let val = raw;
+    if (field === "spz") val = val.toUpperCase();
+    setValues((v) => ({ ...v, [field]: val }));
+    setTouched((t) => new Set(t).add(field));
+  }
+
+  // Submit
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-    setErrors({});
-    setLoading(true);
-    setShowKb(false);
-    setActiveField(null);
+    if (!lang) return;
+    const requiredFields: FormField[] = ["name", "phone", "spz", "firm"];
+    const allTouched = new Set([...touched, ...requiredFields]);
+    setTouched(allTouched);
 
-    const payload = {
-      name: values.name,
-      phone: values.phone,
-      spz: values.spz,
-      firm: values.firm,
-      order: values.order,
-      type: typeValue,
-      lang,
-    };
+    const hasErrors = requiredFields.some((f) => validateField(f, values[f]) !== null) || !typeValue;
+    if (hasErrors) return;
+
+    closeKb();
+    setLoading(true);
+
+    const phone = values.phone.startsWith("+") ? values.phone : `${dialCode}${values.phone}`;
+    const payload = { name: values.name.trim(), phone, spz: values.spz.trim(), firm: values.firm.trim(), order: values.order.trim(), type: typeValue, lang };
 
     if (!navigator.onLine) {
-      // Save offline
       const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) ?? "[]");
       queue.push(payload);
       localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
@@ -149,62 +369,77 @@ export default function KioskPage() {
       return;
     }
 
-    const res = await fetch("/api/drivers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    setLoading(false);
-    if (res.ok) {
-      const data = (await res.json()) as { num: number; confirmSms: string };
-      setConfirmed({ num: data.num, confirmSms: data.confirmSms });
-      setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
-      setTypeValue("");
+    try {
+      const res = await fetch("/api/drivers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (res.ok) {
+        const data = (await res.json()) as { num: number; confirmSms: string };
+        setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
+        setTypeValue("");
+        setTouched(new Set());
+        setConfirmed({ num: data.num, confirmSms: data.confirmSms });
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
-  function handleFieldFocus(field: keyof FormValues) {
-    setActiveField(field);
-    // Only sync keyboard input if keyboard is already visible
-    if (showKb) keyboardRef.current?.setInput(values[field]);
+  // ── Language selection screen ──────────────────────────
+
+  if (!lang) {
+    return (
+      <div className="min-h-screen bg-[#065A82] flex flex-col items-center justify-center p-8 relative">
+        <button
+          onClick={toggleFullscreen}
+          className="absolute top-4 right-4 p-2 rounded-lg bg-blue-700/60 text-white"
+          title="Kiosk mód"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+          </svg>
+        </button>
+
+        <div className="text-center mb-10">
+          <div className="text-white/70 text-sm uppercase tracking-widest mb-2">LGI Logistics</div>
+          <h1 className="text-white text-4xl font-bold mb-1">Vyberte jazyk</h1>
+          <p className="text-blue-200 text-lg">Select language / Sprache / Wybierz język</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 w-full max-w-lg">
+          {(["cs","sk","pl","de"] as Lang[]).map((code) => (
+            <button
+              key={code}
+              onClick={() => selectLang(code)}
+              className="flex flex-col items-center gap-3 bg-white rounded-2xl p-6 shadow-lg active:scale-95 transition-transform hover:bg-blue-50"
+            >
+              <FlagIcon code={code} size={64} />
+              <div className="text-center">
+                <div className="text-xl font-bold text-gray-900">{LANG_META[code].name}</div>
+                <div className="text-sm text-gray-500">{LANG_META[code].dialCode}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {!isOnline && (
+          <div className="mt-6 text-orange-300 text-sm">⚠ Offline režim</div>
+        )}
+      </div>
+    );
   }
 
-  function toggleKeyboard() {
-    if (!showKb) {
-      setShowKb(true);
-      // Sync current value of active field (or first field)
-      const field = activeField ?? "name";
-      setActiveField(field);
-      keyboardRef.current?.setInput(values[field]);
-    } else {
-      setShowKb(false);
-    }
-  }
-
-  function handleKbChange(input: string) {
-    if (!activeField) return;
-    setValues((v) => ({ ...v, [activeField]: input }));
-  }
-
-  function handleKbKeyPress(button: string) {
-    if (button === "{enter}") {
-      setShowKb(false);
-      setActiveField(null);
-    }
-  }
+  // ── Confirmation screen ────────────────────────────────
 
   if (confirmed) {
     const pct = (countdown / RESET_SECONDS) * 100;
-    const r = 54;
+    const r = 48;
     const circ = 2 * Math.PI * r;
     const dash = (pct / 100) * circ;
 
     return (
-      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
-        <div className="max-w-lg w-full text-center">
-          <div className="w-28 h-28 rounded-full bg-[#1D9E75] flex items-center justify-center mx-auto mb-6">
-            <svg className="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="min-h-screen bg-[#065A82] flex flex-col items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 text-center">
+          <div className="w-24 h-24 rounded-full bg-[#1D9E75] flex items-center justify-center mx-auto mb-6 shadow-lg">
+            <svg className="w-14 h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             </svg>
           </div>
@@ -212,48 +447,35 @@ export default function KioskPage() {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.confirmTitle}</h1>
 
           {confirmed.num > 0 && (
-            <div className="bg-[#065A82] text-white rounded-2xl px-8 py-5 my-6 inline-block">
-              <div className="text-sm uppercase tracking-widest opacity-80">{t.confirmNum}</div>
-              <div className="text-7xl font-black leading-none mt-1">{confirmed.num}</div>
+            <div className="bg-[#065A82] text-white rounded-2xl px-10 py-5 my-5 inline-block">
+              <div className="text-sm uppercase tracking-widest opacity-70 mb-1">{t.confirmNum}</div>
+              <div className="text-8xl font-black leading-none">{confirmed.num}</div>
             </div>
           )}
 
-          <p className="text-xl text-gray-700 mb-6 leading-relaxed">{t.confirmInstr}</p>
+          <p className="text-xl text-gray-700 mb-5 leading-relaxed">{t.confirmInstr}</p>
 
-          <div className="bg-gray-100 rounded-xl p-4 text-left mb-8">
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">{t.confirmSmsLabel}</div>
-            <p className="text-gray-800 text-sm leading-relaxed">{confirmed.confirmSms}</p>
+          <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left">
+            <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{t.confirmSmsLabel}</div>
+            <p className="text-sm text-gray-800 leading-relaxed">{confirmed.confirmSms}</p>
           </div>
 
-          {/* Countdown ring */}
-          <div className="flex flex-col items-center gap-2">
-            <svg width="120" height="120" className="-rotate-90">
-              <circle cx="60" cy="60" r={r} fill="none" stroke="#e5e7eb" strokeWidth="6" />
-              <circle
-                cx="60" cy="60" r={r}
-                fill="none"
-                stroke="#065A82"
-                strokeWidth="6"
-                strokeDasharray={`${dash} ${circ}`}
-                strokeLinecap="round"
+          <div className="flex flex-col items-center gap-1 mb-4">
+            <svg width="108" height="108" className="-rotate-90">
+              <circle cx="54" cy="54" r={r} fill="none" stroke="#e5e7eb" strokeWidth="5" />
+              <circle cx="54" cy="54" r={r} fill="none" stroke="#065A82" strokeWidth="5"
+                strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
                 style={{ transition: "stroke-dasharray 1s linear" }}
               />
-              <text
-                x="60" y="60"
-                textAnchor="middle"
-                dominantBaseline="central"
-                style={{ transform: "rotate(90deg)", transformOrigin: "60px 60px", fontSize: "22px", fontWeight: 700, fill: "#065A82" }}
-              >
+              <text x="54" y="54" textAnchor="middle" dominantBaseline="central"
+                style={{ transform: "rotate(90deg)", transformOrigin: "54px 54px", fontSize: "20px", fontWeight: 700, fill: "#065A82" }}>
                 {countdown}s
               </text>
             </svg>
             <p className="text-sm text-gray-400">Automatický reset</p>
           </div>
 
-          <button
-            onClick={() => setConfirmed(null)}
-            className="mt-4 text-[#065A82] underline text-sm"
-          >
+          <button onClick={resetAll} className="text-[#065A82] underline text-sm">
             ← Nová registrace ihned
           </button>
         </div>
@@ -261,270 +483,211 @@ export default function KioskPage() {
     );
   }
 
-  const kbLayout = activeField === "phone"
-    ? {
-        default: ["1 2 3", "4 5 6", "7 8 9", "+ 0 {bksp}", "{enter}"],
-        shift: ["1 2 3", "4 5 6", "7 8 9", "+ 0 {bksp}", "{enter}"],
-      }
-    : {
-        default: [
-          "q w e r t y u i o p",
-          "a s d f g h j k l",
-          "{shift} z x c v b n m {bksp}",
-          "{space} {enter}",
-        ],
-        shift: [
-          "Q W E R T Y U I O P",
-          "A S D F G H J K L",
-          "{shift} Z X C V B N M {bksp}",
-          "{space} {enter}",
-        ],
-      };
+  // ── Form screen ────────────────────────────────────────
+
+  function fieldState(f: FormField): "idle" | "ok" | "err" {
+    if (!touched.has(f)) return "idle";
+    return validateField(f, values[f]) === null ? "ok" : "err";
+  }
+
+  function inputClass(f: FormField) {
+    const st = fieldState(f);
+    return [
+      "w-full border-2 rounded-xl px-4 py-4 text-lg focus:outline-none transition-colors",
+      st === "ok" ? "border-green-400 bg-green-50/30" :
+      st === "err" ? "border-red-400 bg-red-50/30" :
+      "border-gray-200 focus:border-[#065A82]",
+      kbField === f ? "ring-2 ring-[#065A82]/40" : "",
+    ].join(" ");
+  }
+
+  const showKb = kbField !== null;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-[#065A82] text-white px-6 py-4 flex items-center justify-between">
+    <div className={`min-h-screen bg-gray-50 flex flex-col ${showKb ? "pb-[320px]" : ""}`}>
+      {/* Header */}
+      <header className="bg-[#065A82] text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold">LGI Logistics</h1>
-          <p className="text-blue-200 text-sm">{t.subtitle}</p>
+          <h1 className="text-xl font-bold leading-tight">LGI Logistics</h1>
+          <p className="text-blue-200 text-xs">{t.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Offline indicator */}
-          {!isOnline && (
-            <span className="text-xs bg-orange-500 text-white px-2 py-1 rounded-lg">Offline</span>
-          )}
-
-          {/* Fullscreen toggle */}
-          <button
-            onClick={toggleFullscreen}
-            className="p-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white transition"
-            title={isFullscreen ? "Ukončit kiosk mód" : "Kiosk mód (celá obrazovka)"}
-          >
-            {isFullscreen ? (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-              </svg>
-            )}
+          {!isOnline && <span className="text-xs bg-orange-500 px-2 py-1 rounded-lg">Offline</span>}
+          <button onClick={toggleFullscreen} className="p-2 rounded-lg bg-blue-700 hover:bg-blue-600 transition" title="Kiosk mód">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
           </button>
-
-          {/* Language switcher */}
-          {LANGS.map((l) => (
-            <button
-              key={l.code}
-              onClick={() => setLang(l.code)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                lang === l.code
-                  ? "bg-white text-[#065A82]"
-                  : "bg-blue-700 text-white hover:bg-blue-600"
-              }`}
-            >
-              <FlagIcon code={l.code} />
-              <span>{l.label}</span>
-            </button>
-          ))}
+          {/* Language change */}
+          <button onClick={() => { setLang(null); closeKb(); }}
+            className="flex items-center gap-1.5 bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-lg transition">
+            <FlagIcon code={lang} size={22} />
+            <span className="text-sm font-medium">{LANG_META[lang].name}</span>
+          </button>
         </div>
       </header>
 
-      <main className="flex-1 flex items-start justify-center p-6 pb-0">
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 w-full max-w-2xl space-y-5"
-        >
-          <h2 className="text-2xl font-semibold text-gray-900">{t.title}</h2>
+      {/* Form */}
+      <main className="flex-1 p-4 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="max-w-xl mx-auto space-y-4">
+          <h2 className="text-2xl font-bold text-gray-900">{t.title}</h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <Field
-              label={t.name} name="name" value={values.name} error={errors.name} required
-              onFocus={() => handleFieldFocus("name")}
-              onChange={(v) => setValues((prev) => ({ ...prev, name: v }))}
-            />
-            <Field
-              label={t.phone} name="phone" type="tel" value={values.phone} error={errors.phone} required
-              onFocus={() => handleFieldFocus("phone")}
-              onChange={(v) => setValues((prev) => ({ ...prev, phone: v }))}
-            />
-            <Field
-              label={t.spz} name="spz" value={values.spz} error={errors.spz} required
-              onFocus={() => handleFieldFocus("spz")}
-              onChange={(v) => setValues((prev) => ({ ...prev, spz: v }))}
-            />
-            <Field
-              label={t.firm} name="firm" value={values.firm} error={errors.firm} required
-              onFocus={() => handleFieldFocus("firm")}
-              onChange={(v) => setValues((prev) => ({ ...prev, firm: v }))}
-            />
-          </div>
-
-          <div className="flex items-end gap-3">
-            <div className="flex-1">
-              <Field
-                label={t.order} name="order" value={values.order}
-                onFocus={() => handleFieldFocus("order")}
-                onChange={(v) => setValues((prev) => ({ ...prev, order: v }))}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={toggleKeyboard}
-              title="Zobrazit/skrýt virtuální klávesnici"
-              className={`mb-0.5 flex items-center gap-1.5 px-3 py-3 rounded-lg border text-sm font-medium transition ${
-                showKb
-                  ? "bg-[#065A82] text-white border-[#065A82]"
-                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 9h.01M12 9h.01M15 9h.01M9 12h.01M12 12h.01M15 12h.01M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
-              </svg>
-              <span className="hidden sm:inline">Klávesnice</span>
-            </button>
-          </div>
-
+          {/* Type operation — FIRST, large tap buttons */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
               {t.type} <span className="text-red-500">*</span>
             </label>
-            <select
-              name="type"
-              value={typeValue}
-              onChange={(e) => { setTypeValue(e.target.value); setShowKb(false); setActiveField(null); }}
-              className={`w-full border rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#065A82] ${
-                errors.type ? "border-red-400" : "border-gray-300"
-              }`}
-            >
-              <option value="" disabled>—</option>
-              <option value="vyklada">{t.typeOptions.vyklada}</option>
-              <option value="naklada">{t.typeOptions.naklada}</option>
-              <option value="obe">{t.typeOptions.obe}</option>
-            </select>
-            {errors.type && <p className="text-red-500 text-sm mt-1">{errors.type}</p>}
+            <div className="grid grid-cols-3 gap-2">
+              {(["vyklada","naklada","obe"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setTypeValue(v)}
+                  className={`py-4 rounded-xl font-semibold text-sm border-2 transition active:scale-95 ${
+                    typeValue === v
+                      ? "bg-[#065A82] text-white border-[#065A82] shadow-md"
+                      : "bg-white text-gray-700 border-gray-200 hover:border-[#065A82]"
+                  }`}
+                >
+                  {t.typeOptions[v]}
+                </button>
+              ))}
+            </div>
+            {touched.has("name") && !typeValue && (
+              <p className="text-red-500 text-sm mt-1">{t.required}</p>
+            )}
           </div>
 
+          {/* Name */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              {t.name} <span className="text-red-500">*</span>
+            </label>
+            <input
+              value={values.name}
+              readOnly
+              placeholder="Jan Novák"
+              onFocus={() => openKb("name")}
+              onChange={(e) => handleInputChange("name", e.target.value)}
+              className={inputClass("name")}
+            />
+            {fieldState("name") === "err" && <p className="text-red-500 text-xs mt-1">{validateField("name", values.name)}</p>}
+          </div>
+
+          {/* Phone + dial code */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              {t.phone} <span className="text-red-500">*</span>
+            </label>
+            <div className="flex gap-2">
+              <select
+                value={dialCode}
+                onChange={(e) => setDialCode(e.target.value)}
+                onFocus={closeKb}
+                className="border-2 border-gray-200 rounded-xl px-2 py-4 text-base font-medium bg-white focus:border-[#065A82] focus:outline-none"
+              >
+                <option value="+420">🇨🇿 +420</option>
+                <option value="+421">🇸🇰 +421</option>
+                <option value="+48">🇵🇱 +48</option>
+                <option value="+49">🇩🇪 +49</option>
+                <option value="+36">+36</option>
+                <option value="+43">+43</option>
+                <option value="+40">+40</option>
+              </select>
+              <input
+                value={values.phone}
+                readOnly
+                placeholder="123 456 789"
+                onFocus={() => openKb("phone")}
+                onChange={(e) => handleInputChange("phone", e.target.value)}
+                className={`flex-1 ${inputClass("phone")}`}
+                inputMode="tel"
+              />
+            </div>
+            {fieldState("phone") === "err" && <p className="text-red-500 text-xs mt-1">{validateField("phone", values.phone)}</p>}
+          </div>
+
+          {/* SPZ + Firm in row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                {t.spz} <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={values.spz}
+                readOnly
+                placeholder="1AB 2345"
+                onFocus={() => openKb("spz")}
+                onChange={(e) => handleInputChange("spz", e.target.value)}
+                className={inputClass("spz")}
+                style={{ textTransform: "uppercase" }}
+              />
+              {fieldState("spz") === "err" && <p className="text-red-500 text-xs mt-1">{t.required}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                {t.firm} <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={values.firm}
+                readOnly
+                placeholder="Dopravní firma s.r.o."
+                onFocus={() => openKb("firm")}
+                onChange={(e) => handleInputChange("firm", e.target.value)}
+                className={inputClass("firm")}
+              />
+              {fieldState("firm") === "err" && <p className="text-red-500 text-xs mt-1">{t.required}</p>}
+            </div>
+          </div>
+
+          {/* Order (optional) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-1">{t.order}</label>
+            <input
+              value={values.order}
+              readOnly
+              placeholder="ORD-12345"
+              onFocus={() => openKb("order")}
+              onChange={(e) => handleInputChange("order", e.target.value)}
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 text-lg focus:outline-none focus:border-[#065A82] transition-colors"
+            />
+          </div>
+
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#065A82] text-white text-lg font-semibold py-4 rounded-xl hover:bg-[#054a6b] active:scale-[0.99] transition-all disabled:opacity-60"
+            className="w-full bg-[#1D9E75] text-white text-xl font-bold py-5 rounded-2xl shadow-lg hover:bg-[#178a64] active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center gap-3"
           >
-            {loading ? "..." : t.submit}
+            {loading ? (
+              <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+            ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            {loading ? "…" : t.submit}
           </button>
         </form>
       </main>
 
-      {/* Virtual keyboard */}
-      {showKb && (
-        <div className="sticky bottom-0 w-full bg-gray-100 border-t border-gray-200 shadow-lg z-40">
-          <div className="flex justify-end px-4 pt-2">
-            <button
-              onClick={() => { setShowKb(false); setActiveField(null); }}
-              className="text-xs text-gray-500 underline"
-            >
-              Zavřít klávesnici ✕
-            </button>
-          </div>
-          <Keyboard
-            keyboardRef={(r) => { keyboardRef.current = r; }}
-            layoutName="default"
-            layout={kbLayout}
-            onChange={handleKbChange}
-            onKeyPress={handleKbKeyPress}
-            display={{
-              "{bksp}": "⌫",
-              "{enter}": "OK",
-              "{shift}": "⇧",
-              "{space}": "Mezera",
-            }}
-            theme="hg-theme-default hg-layout-default"
-            buttonTheme={[
-              { class: "hg-blue", buttons: "{enter}" },
-            ]}
-          />
-        </div>
+      {/* Virtual keyboard overlay */}
+      {showKb && kbField && lang && (
+        <VirtualKeyboard
+          layer={kbLayer}
+          lang={lang}
+          onChar={kbChar}
+          onBackspace={kbBackspace}
+          onEnter={kbEnter}
+          onSpace={kbSpace}
+          onToggleShift={kbToggleShift}
+          onToggleDiak={kbToggleDiak}
+          onClose={closeKb}
+        />
       )}
     </div>
-  );
-}
-
-function Field({
-  label,
-  name,
-  type = "text",
-  value,
-  error,
-  required,
-  onFocus,
-  onChange,
-}: {
-  label: string;
-  name: string;
-  type?: string;
-  value: string;
-  error?: string;
-  required?: boolean;
-  onFocus?: () => void;
-  onChange?: (v: string) => void;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      <input
-        name={name}
-        type={type}
-        value={value}
-        readOnly
-        onFocus={onFocus}
-        onChange={(e) => onChange?.(e.target.value)}
-        className={`w-full border rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#065A82] cursor-pointer ${
-          error ? "border-red-400" : "border-gray-300"
-        }`}
-      />
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
-    </div>
-  );
-}
-
-// Inline SVG flags — reliable on Windows where emoji flags don't render
-function FlagIcon({ code }: { code: string }) {
-  const flags: Record<string, React.ReactNode> = {
-    cs: (
-      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
-        <rect width="24" height="8" fill="#fff" />
-        <rect y="8" width="24" height="8" fill="#D7141A" />
-        <polygon points="0,0 10,8 0,16" fill="#11457E" />
-      </svg>
-    ),
-    sk: (
-      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
-        <rect width="24" height="5.33" fill="#fff" />
-        <rect y="5.33" width="24" height="5.33" fill="#0B4EA2" />
-        <rect y="10.67" width="24" height="5.33" fill="#EE1C25" />
-        {/* Simple cross emblem */}
-        <rect x="3" y="3" width="2" height="7" fill="#fff" />
-        <rect x="1.5" y="5" width="5" height="2" fill="#fff" />
-      </svg>
-    ),
-    pl: (
-      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
-        <rect width="24" height="8" fill="#fff" />
-        <rect y="8" width="24" height="8" fill="#DC143C" />
-      </svg>
-    ),
-    de: (
-      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
-        <rect width="24" height="5.33" fill="#000" />
-        <rect y="5.33" width="24" height="5.33" fill="#DD0000" />
-        <rect y="10.67" width="24" height="5.33" fill="#FFCE00" />
-      </svg>
-    ),
-  };
-  return (
-    <span className="rounded-sm overflow-hidden inline-flex border border-white/20">
-      {flags[code] ?? null}
-    </span>
   );
 }
