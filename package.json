@@ -16,7 +16,8 @@
     "drizzle-orm": "^0.45.2",
     "next": "16.2.2",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-simple-keyboard": "^3.8.183"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260404.1",

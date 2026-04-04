@@ -14,6 +14,8 @@ export const drivers = sqliteTable("Driver", {
   status: text("status").notNull().default("wait"),
   ramp: text("ramp"),
   rampTime: text("rampTime"),
+  rampAssignedAt: text("rampAssignedAt"),
+  doneAt: text("doneAt"),
   createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updatedAt").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -27,5 +29,23 @@ export const smsLogs = sqliteTable("SmsLog", {
   sentAt: text("sentAt").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const ramps = sqliteTable("Ramp", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  status: text("status").notNull().default("available"), // available | repair
+  note: text("note"),
+});
+
+export const auditLogs = sqliteTable("AuditLog", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  driverId: integer("driverId").references(() => drivers.id),
+  action: text("action").notNull(), // ramp_assigned | done | created
+  ramp: text("ramp"),
+  note: text("note"),
+  createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export type Driver = typeof drivers.$inferSelect;
 export type SmsLogRow = typeof smsLogs.$inferSelect;
+export type Ramp = typeof ramps.$inferSelect;
+export type AuditLog = typeof auditLogs.$inferSelect;

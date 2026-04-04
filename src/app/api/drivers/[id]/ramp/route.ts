@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { drivers, smsLogs } from "@/db/schema";
+import { drivers, smsLogs, auditLogs } from "@/db/schema";
 import { buildRampSms, sendSms, Lang } from "@/lib/sms";
 import { requireOperator } from "@/lib/auth";
 import { eq } from "drizzle-orm";
@@ -30,12 +30,18 @@ export async function PATCH(
     hour: "2-digit",
     minute: "2-digit",
   });
+  const rampAssignedAt = new Date().toISOString();
 
   const [updated] = await db
     .update(drivers)
-    .set({ ramp: String(ramp), rampTime, status: "ramp" })
+    .set({ ramp: String(ramp), rampTime, rampAssignedAt, status: "ramp" })
     .where(eq(drivers.id, Number(id)))
     .returning();
+
+  // Write audit log
+  db.insert(auditLogs)
+    .values({ driverId: driver.id, action: "ramp_assigned", ramp: String(ramp), note: `Čas příjezdu: ${rampTime}` })
+    .catch((err) => console.error("Audit log failed:", err));
 
   const message = buildRampSms(driver.lang as Lang, driver.name, String(ramp), rampTime);
 
