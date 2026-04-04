@@ -166,8 +166,20 @@ export default function KioskPage() {
 
   function handleFieldFocus(field: keyof FormValues) {
     setActiveField(field);
-    setShowKb(true);
-    keyboardRef.current?.setInput(values[field]);
+    // Only sync keyboard input if keyboard is already visible
+    if (showKb) keyboardRef.current?.setInput(values[field]);
+  }
+
+  function toggleKeyboard() {
+    if (!showKb) {
+      setShowKb(true);
+      // Sync current value of active field (or first field)
+      const field = activeField ?? "name";
+      setActiveField(field);
+      keyboardRef.current?.setInput(values[field]);
+    } else {
+      setShowKb(false);
+    }
   }
 
   function handleKbChange(input: string) {
@@ -304,13 +316,13 @@ export default function KioskPage() {
             <button
               key={l.code}
               onClick={() => setLang(l.code)}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 lang === l.code
                   ? "bg-white text-[#065A82]"
                   : "bg-blue-700 text-white hover:bg-blue-600"
               }`}
             >
-              <span className="text-lg">{l.flag}</span>
+              <FlagIcon code={l.code} />
               <span>{l.label}</span>
             </button>
           ))}
@@ -347,11 +359,30 @@ export default function KioskPage() {
             />
           </div>
 
-          <Field
-            label={t.order} name="order" value={values.order}
-            onFocus={() => handleFieldFocus("order")}
-            onChange={(v) => setValues((prev) => ({ ...prev, order: v }))}
-          />
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Field
+                label={t.order} name="order" value={values.order}
+                onFocus={() => handleFieldFocus("order")}
+                onChange={(v) => setValues((prev) => ({ ...prev, order: v }))}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={toggleKeyboard}
+              title="Zobrazit/skrýt virtuální klávesnici"
+              className={`mb-0.5 flex items-center gap-1.5 px-3 py-3 rounded-lg border text-sm font-medium transition ${
+                showKb
+                  ? "bg-[#065A82] text-white border-[#065A82]"
+                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 9h.01M12 9h.01M15 9h.01M9 12h.01M12 12h.01M15 12h.01M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
+              </svg>
+              <span className="hidden sm:inline">Klávesnice</span>
+            </button>
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -454,5 +485,46 @@ function Field({
       />
       {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
     </div>
+  );
+}
+
+// Inline SVG flags — reliable on Windows where emoji flags don't render
+function FlagIcon({ code }: { code: string }) {
+  const flags: Record<string, React.ReactNode> = {
+    cs: (
+      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="8" fill="#fff" />
+        <rect y="8" width="24" height="8" fill="#D7141A" />
+        <polygon points="0,0 10,8 0,16" fill="#11457E" />
+      </svg>
+    ),
+    sk: (
+      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="5.33" fill="#fff" />
+        <rect y="5.33" width="24" height="5.33" fill="#0B4EA2" />
+        <rect y="10.67" width="24" height="5.33" fill="#EE1C25" />
+        {/* Simple cross emblem */}
+        <rect x="3" y="3" width="2" height="7" fill="#fff" />
+        <rect x="1.5" y="5" width="5" height="2" fill="#fff" />
+      </svg>
+    ),
+    pl: (
+      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="8" fill="#fff" />
+        <rect y="8" width="24" height="8" fill="#DC143C" />
+      </svg>
+    ),
+    de: (
+      <svg width="24" height="16" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="5.33" fill="#000" />
+        <rect y="5.33" width="24" height="5.33" fill="#DD0000" />
+        <rect y="10.67" width="24" height="5.33" fill="#FFCE00" />
+      </svg>
+    ),
+  };
+  return (
+    <span className="rounded-sm overflow-hidden inline-flex border border-white/20">
+      {flags[code] ?? null}
+    </span>
   );
 }
