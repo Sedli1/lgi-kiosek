@@ -1,18 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrisma } from "@/lib/prisma";
+import { getDb } from "@/lib/db";
+import { drivers, smsLogs } from "@/db/schema";
 import { buildConfirmSms, sendSms, Lang } from "@/lib/sms";
 import { requireOperator } from "@/lib/auth";
+import { desc, eq } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const denied = await requireOperator(req);
   if (denied) return denied;
 
-  const prisma = await getPrisma();
-  const drivers = await prisma.driver.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { smsLogs: { orderBy: { sentAt: "desc" } } },
-  });
-  return NextResponse.json(drivers);
+  const db = await getDb();
+  const rows = await db.select().from(drivers).orderBy(desc(drivers.createdAt));
+
+  const logs = await db.select().from(smsLogs);
+  const logsByDriver: Record<number, typeof logs> = {};
+  for (const log of logs) {
+    (logsByDriver[log.driverId] ??= []).push(log);
+  }
+
+  const result = rows.map((d) => ({
+    ...d,
+    smsLogs: (logsByDriver[d.id] ?? []).sort(
+      (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()
+    ),
+  }));
+
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -23,20 +36,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  const prisma = await getPrisma();
-  const count = await prisma.driver.count();
+  const db = await getDb();
+  const count = await db.$count(drivers);
   const num = count + 1;
 
-  const driver = await prisma.driver.create({
-    data: { num, name, phone, spz, firm, order: order || null, type, lang },
-  });
+  const [driver] = await db
+    .insert(drivers)
+    .values({ num, name, phone, spz, firm, order: order || null, type, lang })
+    .returning();
 
   const message = buildConfirmSms(lang as Lang, num);
 
   sendSms(phone, message)
     .then(() =>
-      prisma.smsLog.create({
-        data: { driverId: driver.id, type: "confirm", phone, message },
+      db.insert(smsLogs).values({
+        driverId: driver.id,
+        type: "confirm",
+        phone,
+        message,
       })
     )
     .catch((err) => console.error("SMS send failed:", err));

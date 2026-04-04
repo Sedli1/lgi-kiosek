@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrisma } from "@/lib/prisma";
+import { getDb } from "@/lib/db";
+import { drivers } from "@/db/schema";
 import { requireOperator } from "@/lib/auth";
+import { eq } from "drizzle-orm";
 
 export async function PATCH(
   req: NextRequest,
@@ -10,12 +12,13 @@ export async function PATCH(
   if (denied) return denied;
 
   const { id } = await params;
-  const prisma = await getPrisma();
+  const db = await getDb();
 
-  const updated = await prisma.driver.update({
-    where: { id: Number(id) },
-    data: { status: "done" },
-  });
+  const [updated] = await db
+    .update(drivers)
+    .set({ status: "done" })
+    .where(eq(drivers.id, Number(id)))
+    .returning();
 
   return NextResponse.json(updated);
 }
