@@ -2,19 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { drivers } from "@/db/schema";
 import { requireOperator } from "@/lib/auth";
-import { eq } from "drizzle-orm";
-
-interface RampStat {
-  ramp: string;
-  count: number;
-  avgMinutes: number | null;
-}
-
-interface FirmStat {
-  firm: string;
-  count: number;
-  avgMinutes: number | null;
-}
+import { and, eq, gte } from "drizzle-orm";
 
 function minutesBetween(from: string | null, to: string | null): number | null {
   if (!from || !to) return null;
@@ -23,15 +11,32 @@ function minutesBetween(from: string | null, to: string | null): number | null {
   return Math.round(diff / 60000);
 }
 
+// SQLite stores CURRENT_TIMESTAMP as "YYYY-MM-DD HH:MM:SS" — convert JS Date to that format
+function toSqliteDate(d: Date): string {
+  return d.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+}
+
 export async function GET(req: NextRequest) {
   const denied = await requireOperator(req);
   if (denied) return denied;
 
+  const url = req.nextUrl;
+  const fromParam = url.searchParams.get("from"); // ISO string or null
+
   const db = await getDb();
+
+  const conditions = [eq(drivers.status, "done")];
+  if (fromParam) {
+    const fromDate = new Date(fromParam);
+    if (!isNaN(fromDate.getTime())) {
+      conditions.push(gte(drivers.createdAt, toSqliteDate(fromDate)));
+    }
+  }
+
   const done = await db
     .select()
     .from(drivers)
-    .where(eq(drivers.status, "done"));
+    .where(and(...conditions));
 
   // Per ramp
   const rampMap = new Map<string, number[]>();
@@ -43,7 +48,7 @@ export async function GET(req: NextRequest) {
     rampMap.set(d.ramp, arr);
   }
 
-  const perRamp: RampStat[] = [...rampMap.entries()]
+  const perRamp = [...rampMap.entries()]
     .map(([ramp, mins]) => ({
       ramp,
       count: mins.length,
@@ -60,7 +65,7 @@ export async function GET(req: NextRequest) {
     firmMap.set(d.firm, arr);
   }
 
-  const perFirm: FirmStat[] = [...firmMap.entries()]
+  const perFirm = [...firmMap.entries()]
     .map(([firm, mins]) => ({
       firm,
       count: mins.length,
@@ -69,5 +74,5 @@ export async function GET(req: NextRequest) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 20);
 
-  return NextResponse.json({ perRamp, perFirm, totalDone: done.length });
+  return NextResponse.json({ perRamp, perFirm, totalDone: done.length, rows: done });
 }

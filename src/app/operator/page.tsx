@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type JSX } from "react";
 import { buildRampSms } from "@/lib/sms-client";
 
 interface SmsLog {
@@ -46,11 +46,21 @@ interface AuditLog {
   createdAt: string;
 }
 
+interface DriverRow {
+  id: number; num: number; name: string; phone: string; spz: string;
+  firm: string; order: string | null; type: string; status: string;
+  ramp: string | null; rampTime: string | null; rampAssignedAt: string | null;
+  doneAt: string | null; createdAt: string;
+}
+
 interface Stats {
   perRamp: { ramp: string; count: number; avgMinutes: number | null }[];
   perFirm: { firm: string; count: number; avgMinutes: number | null }[];
   totalDone: number;
+  rows: DriverRow[];
 }
+
+type StatsPeriod = "today" | "week" | "month" | "all";
 
 const STATUS_LABELS: Record<string, string> = {
   wait: "Čeká",
@@ -70,6 +80,58 @@ const ACTION_LABELS: Record<string, string> = {
   done: "Dokončeno",
 };
 
+function periodToFrom(period: StatsPeriod): string | null {
+  const now = new Date();
+  if (period === "today") {
+    const d = new Date(now); d.setHours(0, 0, 0, 0); return d.toISOString();
+  }
+  if (period === "week") {
+    const d = new Date(now); d.setDate(d.getDate() - 7); return d.toISOString();
+  }
+  if (period === "month") {
+    const d = new Date(now); d.setDate(d.getDate() - 30); return d.toISOString();
+  }
+  return null;
+}
+
+const PERIOD_LABELS: Record<StatsPeriod, string> = {
+  today: "Dnes",
+  week: "7 dní",
+  month: "30 dní",
+  all: "Vše",
+};
+
+function exportCsv(rows: DriverRow[]) {
+  const header = ["#", "Jméno", "Telefon", "SPZ", "Firma", "Typ", "Rampa", "Čas příjezdu", "Přidělena rampa", "Dokončeno", "Doba na rampě (min)"];
+  const lines = rows.map((r) => {
+    const durationMins =
+      r.rampAssignedAt && r.doneAt
+        ? Math.round((new Date(r.doneAt).getTime() - new Date(r.rampAssignedAt).getTime()) / 60000)
+        : "";
+    return [
+      r.num,
+      r.name,
+      r.phone,
+      r.spz,
+      r.firm,
+      r.type,
+      r.ramp ?? "",
+      r.rampTime ?? "",
+      r.rampAssignedAt ? new Date(r.rampAssignedAt).toLocaleString("cs-CZ") : "",
+      r.doneAt ? new Date(r.doneAt).toLocaleString("cs-CZ") : "",
+      durationMins,
+    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
+  });
+  const csv = [header.join(","), ...lines].join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `lgi-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function nowTime() {
   return new Date().toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
 }
@@ -85,6 +147,7 @@ export default function OperatorPage() {
   const [rampRows, setRampRows] = useState<Ramp[]>([]);
   const [auditData, setAuditData] = useState<AuditLog[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("today");
   const [tab, setTab] = useState<"active" | "history" | "stats" | "audit">("active");
   const [password, setPassword] = useState(() => {
     if (typeof window !== "undefined") {
@@ -163,16 +226,19 @@ export default function OperatorPage() {
     return () => { es?.close(); };
   }, [authed, password]);
 
-  // Load stats when stats tab opens
+  // Load stats when stats tab opens or period changes
   useEffect(() => {
     if (tab !== "stats" || !authed) return;
-    fetch(`/api/stats?pass=${encodeURIComponent(password)}`, {
+    setStats(null);
+    const fromDate = periodToFrom(statsPeriod);
+    const qs = fromDate ? `&from=${encodeURIComponent(fromDate)}` : "";
+    fetch(`/api/stats?pass=${encodeURIComponent(password)}${qs}`, {
       headers: { "x-operator-pass": password },
     })
       .then((r) => r.json())
       .then((d) => setStats(d as Stats))
       .catch(() => {});
-  }, [tab, authed, password]);
+  }, [tab, authed, password, statsPeriod]);
 
   // Check for ramp conflict
   useEffect(() => {
@@ -430,6 +496,36 @@ export default function OperatorPage() {
           {/* Stats */}
           {tab === "stats" && (
             <div className="p-6">
+              {/* Filter + export toolbar */}
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <div className="flex gap-1">
+                  {(["today", "week", "month", "all"] as StatsPeriod[]).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setStatsPeriod(p)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                        statsPeriod === p
+                          ? "bg-[#065A82] text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {PERIOD_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+                {stats && stats.rows.length > 0 && (
+                  <button
+                    onClick={() => exportCsv(stats.rows)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Export CSV ({stats.rows.length})
+                  </button>
+                )}
+              </div>
+
               {!stats ? (
                 <div className="text-center text-gray-400 py-8">Načítám statistiky…</div>
               ) : (
@@ -664,9 +760,7 @@ function DriverRow({
         </div>
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">
-        <div className="text-xs text-gray-400">
-          {new Date(d.createdAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}
-        </div>
+        <WaitingBadge createdAt={d.createdAt} status={d.status} />
         <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />
         {d.status === "wait" && (
           <button
@@ -686,6 +780,35 @@ function DriverRow({
         )}
       </div>
     </div>
+  );
+}
+
+function WaitingBadge({ createdAt, status }: { createdAt: string; status: string }) {
+  const [mins, setMins] = useState(() =>
+    Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000)
+  );
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMins(Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [createdAt]);
+
+  const label = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  const color =
+    status === "ramp"
+      ? "text-green-600 bg-green-50"
+      : mins < 15
+      ? "text-gray-500 bg-gray-50"
+      : mins < 30
+      ? "text-amber-600 bg-amber-50"
+      : "text-red-600 bg-red-50";
+
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${color}`} title="Čeká od registrace">
+      ⏱ {label}
+    </span>
   );
 }
 
