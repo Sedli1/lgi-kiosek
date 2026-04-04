@@ -1,0 +1,17 @@
+{
+  "name": "lgi-kiosek",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lgi-kiosek-db",
+      "database_id": "PLACEHOLDER_REPLACE_AFTER_CF_CREATE"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Driver {
+  id        Int      @id @default(autoincrement())
+  num       Int
+  name      String
+  phone     String
+  spz       String
+  firm      String
+  order     String?
+  type      String
+  lang      String
+  status    String   @default("wait")
+  ramp      String?
+  rampTime  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  smsLogs   SmsLog[]
+}
+
+model SmsLog {
+  id        Int      @id @default(autoincrement())
+  driverId  Int
+  driver    Driver   @relation(fields: [driverId], references: [id])
+  type      String
+  phone     String
+  message   String
+  sentAt    DateTime @default(now())
+}
