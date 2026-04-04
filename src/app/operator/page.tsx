@@ -42,7 +42,12 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function OperatorPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search).get("pass") ?? "";
+    }
+    return "";
+  });
   const [authed, setAuthed] = useState(false);
   const [authError, setAuthError] = useState(false);
   const [rampModal, setRampModal] = useState<Driver | null>(null);
@@ -50,11 +55,19 @@ export default function OperatorPage() {
   const [sending, setSending] = useState(false);
 
   const fetchDrivers = useCallback(async () => {
-    const res = await fetch("/api/drivers", {
-      headers: authed ? { "x-operator-pass": password } : {},
+    const res = await fetch(`/api/drivers?pass=${encodeURIComponent(password)}`, {
+      headers: { "x-operator-pass": password },
     });
     if (res.ok) setDrivers(await res.json());
   }, [authed, password]);
+
+  // Auto-login when ?pass= is in the URL
+  useEffect(() => {
+    const urlPass = new URLSearchParams(window.location.search).get("pass");
+    if (urlPass && urlPass.length >= 3 && !authed) {
+      setAuthed(true);
+    }
+  }, [authed]);
 
   useEffect(() => {
     if (!authed) return;
@@ -77,7 +90,7 @@ export default function OperatorPage() {
   async function assignRamp() {
     if (!rampModal) return;
     setSending(true);
-    await fetch(`/api/drivers/${rampModal.id}/ramp`, {
+    await fetch(`/api/drivers/${rampModal.id}/ramp?pass=${encodeURIComponent(password)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", "x-operator-pass": password },
       body: JSON.stringify({ ramp: selectedRamp }),
@@ -88,7 +101,7 @@ export default function OperatorPage() {
   }
 
   async function markDone(id: number) {
-    await fetch(`/api/drivers/${id}/done`, {
+    await fetch(`/api/drivers/${id}/done?pass=${encodeURIComponent(password)}`, {
       method: "PATCH",
       headers: { "x-operator-pass": password },
     });
