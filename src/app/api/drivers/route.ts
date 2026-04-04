@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/prisma";
 import { buildConfirmSms, sendSms, Lang } from "@/lib/sms";
+import { requireOperator } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const denied = await requireOperator(req);
+  if (denied) return denied;
+
   const prisma = await getPrisma();
   const drivers = await prisma.driver.findMany({
     orderBy: { createdAt: "desc" },

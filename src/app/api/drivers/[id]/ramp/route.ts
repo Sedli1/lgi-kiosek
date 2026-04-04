@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/prisma";
 import { buildRampSms, sendSms, Lang } from "@/lib/sms";
+import { requireOperator } from "@/lib/auth";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await requireOperator(req);
+  if (denied) return denied;
+
   const { id } = await params;
   const body = (await req.json()) as Record<string, string>;
   const { ramp } = body;
