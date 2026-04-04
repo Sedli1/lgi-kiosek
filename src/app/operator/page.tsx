@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { buildRampSms, buildConfirmSms } from "@/lib/sms-client";
+import { buildRampSms } from "@/lib/sms-client";
 
 interface SmsLog {
   id: number;
@@ -40,8 +40,13 @@ const TYPE_LABELS: Record<string, string> = {
   obe: "Vykl. + Nakl.",
 };
 
+function nowTime() {
+  return new Date().toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function OperatorPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [tab, setTab] = useState<"active" | "history">("active");
   const [password, setPassword] = useState(() => {
     if (typeof window !== "undefined") {
       return new URLSearchParams(window.location.search).get("pass") ?? "";
@@ -52,6 +57,8 @@ export default function OperatorPage() {
   const [authError, setAuthError] = useState(false);
   const [rampModal, setRampModal] = useState<Driver | null>(null);
   const [selectedRamp, setSelectedRamp] = useState("1");
+  const [selectedTime, setSelectedTime] = useState(nowTime());
+  const [rampConflict, setRampConflict] = useState<Driver | null>(null);
   const [sending, setSending] = useState(false);
 
   const fetchDrivers = useCallback(async () => {
@@ -61,12 +68,9 @@ export default function OperatorPage() {
     if (res.ok) setDrivers(await res.json());
   }, [authed, password]);
 
-  // Auto-login when ?pass= is in the URL
   useEffect(() => {
     const urlPass = new URLSearchParams(window.location.search).get("pass");
-    if (urlPass && urlPass.length >= 3 && !authed) {
-      setAuthed(true);
-    }
+    if (urlPass && urlPass.length >= 3 && !authed) setAuthed(true);
   }, [authed]);
 
   useEffect(() => {
@@ -76,15 +80,25 @@ export default function OperatorPage() {
     return () => clearInterval(interval);
   }, [authed, fetchDrivers]);
 
+  // Check for ramp conflict whenever ramp selection changes
+  useEffect(() => {
+    if (!rampModal) return;
+    const conflict = drivers.find(
+      (d) => d.status === "ramp" && d.ramp === selectedRamp && d.id !== rampModal.id
+    ) ?? null;
+    setRampConflict(conflict);
+  }, [selectedRamp, rampModal, drivers]);
+
+  function openRampModal(driver: Driver) {
+    setRampModal(driver);
+    setSelectedRamp("1");
+    setSelectedTime(nowTime());
+  }
+
   function handleAuth(e: React.FormEvent) {
     e.preventDefault();
-    // Simple client-side check; server validates too
-    if (password.length >= 3) {
-      setAuthed(true);
-      setAuthError(false);
-    } else {
-      setAuthError(true);
-    }
+    if (password.length >= 3) { setAuthed(true); setAuthError(false); }
+    else setAuthError(true);
   }
 
   async function assignRamp() {
@@ -93,10 +107,11 @@ export default function OperatorPage() {
     await fetch(`/api/drivers/${rampModal.id}/ramp?pass=${encodeURIComponent(password)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", "x-operator-pass": password },
-      body: JSON.stringify({ ramp: selectedRamp }),
+      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime }),
     });
     setSending(false);
     setRampModal(null);
+    setRampConflict(null);
     fetchDrivers();
   }
 
@@ -122,10 +137,7 @@ export default function OperatorPage() {
             className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-[#065A82]"
           />
           {authError && <p className="text-red-500 text-sm mb-3">Nesprávné heslo</p>}
-          <button
-            type="submit"
-            className="w-full bg-[#065A82] text-white font-semibold py-3 rounded-xl hover:bg-[#054a6b] transition"
-          >
+          <button type="submit" className="w-full bg-[#065A82] text-white font-semibold py-3 rounded-xl hover:bg-[#054a6b] transition">
             Přihlásit
           </button>
         </form>
@@ -133,23 +145,26 @@ export default function OperatorPage() {
     );
   }
 
-  const waiting = drivers.filter((d) => d.status === "wait").length;
-  const onRamp = drivers.filter((d) => d.status === "ramp").length;
-  const done = drivers.filter((d) => d.status === "done").length;
+  const active = drivers.filter((d) => d.status !== "done");
+  const history = drivers.filter((d) => d.status === "done");
+  const waiting = active.filter((d) => d.status === "wait").length;
+  const onRamp = active.filter((d) => d.status === "ramp").length;
 
   const allLogs = drivers
     .flatMap((d) => d.smsLogs.map((l) => ({ ...l, driverName: d.name, spz: d.spz })))
     .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
     .slice(0, 20);
 
+  // Which ramps are currently occupied
+  const occupiedRamps = new Set(
+    drivers.filter((d) => d.status === "ramp").map((d) => d.ramp)
+  );
+
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
       <header className="bg-[#065A82] text-white px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-bold">LGI – Operátorský panel</h1>
-        <button onClick={() => setAuthed(false)} className="text-blue-200 text-sm hover:text-white">
-          Odhlásit
-        </button>
+        <button onClick={() => setAuthed(false)} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
       </header>
 
       <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -157,62 +172,86 @@ export default function OperatorPage() {
         <div className="grid grid-cols-3 gap-4">
           <StatCard label="Čeká" value={waiting} color="amber" />
           <StatCard label="Na rampě" value={onRamp} color="green" />
-          <StatCard label="Hotovo dnes" value={done} color="gray" />
+          <StatCard label="Hotovo dnes" value={history.length} color="gray" />
         </div>
 
-        {/* Driver list */}
+        {/* Tabs */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900">Registrovaní řidiči</h2>
-            <button onClick={fetchDrivers} className="text-sm text-[#065A82] hover:underline">
-              Obnovit
+          <div className="flex border-b border-gray-100">
+            {(["active", "history"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`flex-1 py-3 text-sm font-medium transition ${
+                  tab === t
+                    ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {t === "active" ? `Aktivní (${active.length})` : `Historie (${history.length})`}
+              </button>
+            ))}
+            <button
+              onClick={fetchDrivers}
+              className="px-4 text-sm text-gray-400 hover:text-[#065A82] border-l border-gray-100"
+            >
+              ↻
             </button>
           </div>
-          {drivers.length === 0 ? (
-            <div className="px-6 py-10 text-center text-gray-400">Žádní registrovaní řidiči</div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {drivers.map((d) => (
-                <div key={d.id} className="px-6 py-4 flex items-center gap-4 hover:bg-gray-50">
-                  <div className="w-10 h-10 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    {d.num}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900">{d.name}</div>
-                    <div className="text-sm text-gray-500 flex gap-3 flex-wrap">
-                      <span>{d.spz}</span>
-                      <span>·</span>
-                      <span>{d.firm}</span>
-                      <span>·</span>
-                      <span>{TYPE_LABELS[d.type] ?? d.type}</span>
-                      {d.order && <><span>·</span><span>#{d.order}</span></>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="text-xs text-gray-400">
-                      {new Date(d.createdAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}
-                    </div>
-                    <StatusBadge status={d.status} ramp={d.ramp} />
-                    {d.status === "wait" && (
-                      <button
-                        onClick={() => { setRampModal(d); setSelectedRamp("1"); }}
-                        className="bg-[#065A82] text-white text-sm px-3 py-1.5 rounded-lg hover:bg-[#054a6b] transition"
-                      >
-                        Přidělit rampu
-                      </button>
-                    )}
-                    {d.status === "ramp" && (
-                      <button
-                        onClick={() => markDone(d.id)}
-                        className="bg-gray-500 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-gray-600 transition"
-                      >
-                        Hotovo
-                      </button>
-                    )}
-                  </div>
+
+          {tab === "active" && (
+            <>
+              {active.length === 0 ? (
+                <div className="px-6 py-10 text-center text-gray-400">Žádní aktivní řidiči</div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {active.map((d) => (
+                    <DriverRow
+                      key={d.id}
+                      driver={d}
+                      occupiedRamps={occupiedRamps}
+                      onAssign={() => openRampModal(d)}
+                      onDone={() => markDone(d.id)}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
+          )}
+
+          {tab === "history" && (
+            <>
+              {history.length === 0 ? (
+                <div className="px-6 py-10 text-center text-gray-400">Žádné dokončené vykládky dnes</div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {history.map((d) => (
+                    <div key={d.id} className="px-6 py-4 flex items-center gap-4 opacity-70">
+                      <div className="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                        {d.num}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-700">{d.name}</div>
+                        <div className="text-sm text-gray-400 flex gap-2 flex-wrap">
+                          <span>{d.spz}</span>
+                          <span>·</span>
+                          <span>{d.firm}</span>
+                          <span>·</span>
+                          <span>{TYPE_LABELS[d.type] ?? d.type}</span>
+                          {d.ramp && <><span>·</span><span className="text-green-600 font-medium">Rampa {d.ramp}</span></>}
+                          {d.order && <><span>·</span><span>#{d.order}</span></>}
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-400 text-right flex-shrink-0">
+                        <div>Příjezd {new Date(d.createdAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</div>
+                        {d.rampTime && <div>Rampa {d.rampTime}</div>}
+                      </div>
+                      <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-gray-100 text-gray-500">Hotovo</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -220,7 +259,7 @@ export default function OperatorPage() {
         {allLogs.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100">
-              <h2 className="font-semibold text-gray-900">Log odeslaných SMS</h2>
+              <h2 className="font-semibold text-gray-900">Log SMS</h2>
             </div>
             <div className="divide-y divide-gray-100">
               {allLogs.map((l) => (
@@ -249,42 +288,71 @@ export default function OperatorPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <h3 className="text-lg font-bold text-gray-900 mb-1">Přidělit rampu</h3>
-            <p className="text-gray-500 text-sm mb-4">
-              {rampModal.name} · {rampModal.spz}
-            </p>
+            <p className="text-gray-500 text-sm mb-4">{rampModal.name} · {rampModal.spz} · {TYPE_LABELS[rampModal.type] ?? rampModal.type}</p>
 
-            <label className="block text-sm font-medium text-gray-700 mb-2">Číslo rampy</label>
-            <div className="flex gap-2 mb-5">
-              {["1", "2", "3", "4", "5", "6"].map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setSelectedRamp(r)}
-                  className={`w-10 h-10 rounded-lg font-bold text-sm transition ${
-                    selectedRamp === r
-                      ? "bg-[#065A82] text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {r}
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Číslo rampy</label>
+                <div className="flex gap-2 flex-wrap">
+                  {["1", "2", "3", "4", "5", "6"].map((r) => {
+                    const occupied = occupiedRamps.has(r);
+                    return (
+                      <button
+                        key={r}
+                        onClick={() => setSelectedRamp(r)}
+                        title={occupied ? "Rampa je obsazena" : ""}
+                        className={`w-10 h-10 rounded-lg font-bold text-sm transition relative ${
+                          selectedRamp === r
+                            ? "bg-[#065A82] text-white ring-2 ring-[#065A82] ring-offset-1"
+                            : occupied
+                            ? "bg-red-100 text-red-600 border-2 border-red-300"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        {r}
+                        {occupied && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Čas příjezdu</label>
+                <input
+                  type="time"
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-[#065A82]"
+                />
+              </div>
             </div>
+
+            {/* Conflict warning */}
+            {rampConflict && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 flex items-start gap-2">
+                <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+                <div>
+                  <div className="text-sm font-semibold text-red-700">Rampa {selectedRamp} je obsazena!</div>
+                  <div className="text-xs text-red-600 mt-0.5">
+                    {rampConflict.name} · {rampConflict.spz} zde právě vykládá od {rampConflict.rampTime}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="bg-gray-50 rounded-xl p-3 mb-5">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Náhled SMS</div>
               <p className="text-sm text-gray-800">
-                {buildRampSms(
-                  rampModal.lang as "cs" | "sk" | "pl" | "de",
-                  rampModal.name,
-                  selectedRamp,
-                  new Date().toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })
-                )}
+                {buildRampSms(rampModal.lang as "cs" | "sk" | "pl" | "de", rampModal.name, selectedRamp, selectedTime)}
               </p>
             </div>
 
             <div className="flex gap-3">
               <button
-                onClick={() => setRampModal(null)}
+                onClick={() => { setRampModal(null); setRampConflict(null); }}
                 className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50"
               >
                 Zrušit
@@ -292,14 +360,69 @@ export default function OperatorPage() {
               <button
                 onClick={assignRamp}
                 disabled={sending}
-                className="flex-1 bg-[#1D9E75] text-white py-2.5 rounded-xl font-medium hover:bg-[#178a64] disabled:opacity-60 transition"
+                className={`flex-1 text-white py-2.5 rounded-xl font-medium disabled:opacity-60 transition ${
+                  rampConflict ? "bg-orange-500 hover:bg-orange-600" : "bg-[#1D9E75] hover:bg-[#178a64]"
+                }`}
               >
-                {sending ? "Odesílám..." : "Odeslat SMS"}
+                {sending ? "Odesílám..." : rampConflict ? "Přesto odeslat ⚠" : "Odeslat SMS"}
               </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function DriverRow({
+  driver: d,
+  occupiedRamps,
+  onAssign,
+  onDone,
+}: {
+  driver: Driver;
+  occupiedRamps: Set<string | null>;
+  onAssign: () => void;
+  onDone: () => void;
+}) {
+  return (
+    <div className="px-6 py-4 flex items-center gap-4 hover:bg-gray-50">
+      <div className="w-10 h-10 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+        {d.num}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-gray-900">{d.name}</div>
+        <div className="text-sm text-gray-500 flex gap-3 flex-wrap">
+          <span>{d.spz}</span>
+          <span>·</span>
+          <span>{d.firm}</span>
+          <span>·</span>
+          <span>{TYPE_LABELS[d.type] ?? d.type}</span>
+          {d.order && <><span>·</span><span>#{d.order}</span></>}
+        </div>
+      </div>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="text-xs text-gray-400">
+          {new Date(d.createdAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}
+        </div>
+        <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />
+        {d.status === "wait" && (
+          <button
+            onClick={onAssign}
+            className="bg-[#065A82] text-white text-sm px-3 py-1.5 rounded-lg hover:bg-[#054a6b] transition"
+          >
+            Přidělit rampu
+          </button>
+        )}
+        {d.status === "ramp" && (
+          <button
+            onClick={onDone}
+            className="bg-gray-500 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-gray-600 transition"
+          >
+            Hotovo ✓
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -318,7 +441,7 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   );
 }
 
-function StatusBadge({ status, ramp }: { status: string; ramp: string | null }) {
+function StatusBadge({ status, ramp, rampTime }: { status: string; ramp: string | null; rampTime: string | null }) {
   const styles: Record<string, string> = {
     wait: "bg-amber-100 text-amber-700",
     ramp: "bg-green-100 text-green-700",
@@ -326,7 +449,9 @@ function StatusBadge({ status, ramp }: { status: string; ramp: string | null }) 
   };
   return (
     <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${styles[status] ?? ""}`}>
-      {status === "ramp" && ramp ? `Rampa ${ramp}` : STATUS_LABELS[status] ?? status}
+      {status === "ramp" && ramp
+        ? `Rampa ${ramp}${rampTime ? " · " + rampTime : ""}`
+        : STATUS_LABELS[status] ?? status}
     </span>
   );
 }

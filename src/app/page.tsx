@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LANGS, T, Lang } from "@/lib/i18n";
 
 interface ConfirmData {
@@ -8,13 +8,33 @@ interface ConfirmData {
   confirmSms: string;
 }
 
+const RESET_SECONDS = 90;
+
 export default function KioskPage() {
   const [lang, setLang] = useState<Lang>("cs");
   const [confirmed, setConfirmed] = useState<ConfirmData | null>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [countdown, setCountdown] = useState(RESET_SECONDS);
 
   const t = T[lang];
+
+  // Auto-reset countdown after registration
+  useEffect(() => {
+    if (!confirmed) return;
+    setCountdown(RESET_SECONDS);
+    const interval = setInterval(() => {
+      setCountdown((s) => {
+        if (s <= 1) {
+          clearInterval(interval);
+          setConfirmed(null);
+          return RESET_SECONDS;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [confirmed]);
 
   function validate(form: FormData) {
     const errs: Record<string, string> = {};
@@ -54,6 +74,11 @@ export default function KioskPage() {
   }
 
   if (confirmed) {
+    const pct = (countdown / RESET_SECONDS) * 100;
+    const r = 54;
+    const circ = 2 * Math.PI * r;
+    const dash = (pct / 100) * circ;
+
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
         <div className="max-w-lg w-full text-center">
@@ -70,18 +95,44 @@ export default function KioskPage() {
             <div className="text-7xl font-black leading-none mt-1">{confirmed.num}</div>
           </div>
 
-          <p className="text-xl text-gray-700 mb-8 leading-relaxed">{t.confirmInstr}</p>
+          <p className="text-xl text-gray-700 mb-6 leading-relaxed">{t.confirmInstr}</p>
 
-          <div className="bg-gray-100 rounded-xl p-4 text-left">
+          <div className="bg-gray-100 rounded-xl p-4 text-left mb-8">
             <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">{t.confirmSmsLabel}</div>
             <p className="text-gray-800 text-sm leading-relaxed">{confirmed.confirmSms}</p>
           </div>
 
+          {/* Countdown ring */}
+          <div className="flex flex-col items-center gap-2">
+            <svg width="120" height="120" className="-rotate-90">
+              <circle cx="60" cy="60" r={r} fill="none" stroke="#e5e7eb" strokeWidth="6" />
+              <circle
+                cx="60" cy="60" r={r}
+                fill="none"
+                stroke="#065A82"
+                strokeWidth="6"
+                strokeDasharray={`${dash} ${circ}`}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dasharray 1s linear" }}
+              />
+              <text
+                x="60" y="60"
+                textAnchor="middle"
+                dominantBaseline="central"
+                className="rotate-90"
+                style={{ transform: "rotate(90deg)", transformOrigin: "60px 60px", fontSize: "22px", fontWeight: 700, fill: "#065A82" }}
+              >
+                {countdown}s
+              </text>
+            </svg>
+            <p className="text-sm text-gray-400">Automatický reset</p>
+          </div>
+
           <button
             onClick={() => setConfirmed(null)}
-            className="mt-8 text-[#065A82] underline text-sm"
+            className="mt-4 text-[#065A82] underline text-sm"
           >
-            ← Nová registrace
+            ← Nová registrace ihned
           </button>
         </div>
       </div>

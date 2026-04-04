@@ -14,7 +14,7 @@ export async function PATCH(
 
   const { id } = await params;
   const body = (await req.json()) as Record<string, string>;
-  const { ramp } = body;
+  const { ramp, rampTime: operatorTime } = body;
 
   if (!ramp) {
     return NextResponse.json({ error: "Missing ramp" }, { status: 400 });
@@ -26,7 +26,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   }
 
-  const rampTime = new Date().toLocaleTimeString("cs-CZ", {
+  const rampTime = operatorTime || new Date().toLocaleTimeString("cs-CZ", {
     hour: "2-digit",
     minute: "2-digit",
   });
