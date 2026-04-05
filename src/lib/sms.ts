@@ -1,32 +1,31 @@
 export { buildConfirmSms, buildRampSms, type Lang } from "./sms-client";
 
 export async function sendSms(phone: string, message: string): Promise<void> {
-  // Import lazily so the module is usable in edge runtime
   const { getCloudflareContext } = await import("@opennextjs/cloudflare");
   const { env } = await getCloudflareContext({ async: true });
-  const token = env.SMSAPI_TOKEN;
+  const accountSid = env.TWILIO_ACCOUNT_SID;
+  const authToken = env.TWILIO_AUTH_TOKEN;
+  const from = env.TWILIO_FROM;
 
-  if (!token || token === "your_token_here") {
+  if (!accountSid || !authToken || !from) {
     console.log(`[SMS MOCK] To: ${phone}\n${message}`);
     return;
   }
 
-  const params = new URLSearchParams({
-    access_token: token,
-    to: phone,
-    message,
-    from: "LGI",
-    format: "json",
-    encoding: "utf-8",
-  });
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+  const credentials = btoa(`${accountSid}:${authToken}`);
 
-  const res = await fetch("https://api.smsapi.pl/sms.do", {
+  const res = await fetch(url, {
     method: "POST",
-    body: params,
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ To: phone, From: from, Body: message }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`SMSAPI error: ${res.status} ${text}`);
+    throw new Error(`Twilio error: ${res.status} ${text}`);
   }
 }
