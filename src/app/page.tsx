@@ -137,6 +137,7 @@ export default function KioskPage() {
 
   function resetAll() {
     setConfirmed(null);
+    setLang(null);
     setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
     setTypeValue("");
     setTouched(new Set());
@@ -343,7 +344,7 @@ export default function KioskPage() {
             </svg>
           </button>
           {/* Language change */}
-          <button onClick={() => { setLang(null); closeKb(); }}
+          <button onClick={() => setLang(null)}
             className="flex items-center gap-1.5 bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-lg transition">
             <FlagIcon code={lang} size={22} />
             <span className="text-sm font-medium">{LANG_META[lang].name}</span>
