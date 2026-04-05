@@ -16,8 +16,8 @@ export async function PATCH(
   const body = (await req.json()) as Record<string, string>;
   const { ramp, rampTime: operatorTime } = body;
 
-  if (!ramp) {
-    return NextResponse.json({ error: "Missing ramp" }, { status: 400 });
+  if (!ramp || !/^\d{1,2}$/.test(String(ramp))) {
+    return NextResponse.json({ error: "Invalid ramp" }, { status: 400 });
   }
 
   const db = await getDb();
