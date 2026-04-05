@@ -12,6 +12,7 @@ export async function PATCH(
   if (denied) return denied;
 
   const { id } = await params;
+  const operatorName = req.headers.get("x-operator-name") ?? null;
   const db = await getDb();
   const doneAt = new Date().toISOString();
 
@@ -21,9 +22,8 @@ export async function PATCH(
     .where(eq(drivers.id, Number(id)))
     .returning();
 
-  // Write audit log
   db.insert(auditLogs)
-    .values({ driverId: Number(id), action: "done", ramp: updated?.ramp ?? null, note: null })
+    .values({ driverId: Number(id), action: "done", ramp: updated?.ramp ?? null, note: null, operatorName })
     .catch((err) => console.error("Audit log failed:", err));
 
   return NextResponse.json(updated);

@@ -16,6 +16,7 @@ export const drivers = sqliteTable("Driver", {
   rampTime: text("rampTime"),
   rampAssignedAt: text("rampAssignedAt"),
   doneAt: text("doneAt"),
+  note: text("note"),
   createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updatedAt").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -39,9 +40,10 @@ export const ramps = sqliteTable("Ramp", {
 export const auditLogs = sqliteTable("AuditLog", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   driverId: integer("driverId").references(() => drivers.id),
-  action: text("action").notNull(), // ramp_assigned | done | created
+  action: text("action").notNull(), // ramp_assigned | done | created | note_added
   ramp: text("ramp"),
   note: text("note"),
+  operatorName: text("operatorName"),
   createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

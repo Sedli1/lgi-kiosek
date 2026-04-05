@@ -13,6 +13,7 @@ export async function PATCH(
   if (denied) return denied;
 
   const { id } = await params;
+  const operatorName = req.headers.get("x-operator-name") ?? null;
   const body = (await req.json()) as Record<string, string>;
   const { ramp, rampTime: operatorTime } = body;
 
@@ -40,7 +41,7 @@ export async function PATCH(
 
   // Write audit log
   db.insert(auditLogs)
-    .values({ driverId: driver.id, action: "ramp_assigned", ramp: String(ramp), note: `Čas příjezdu: ${rampTime}` })
+    .values({ driverId: driver.id, action: "ramp_assigned", ramp: String(ramp), note: `Čas příjezdu: ${rampTime}`, operatorName })
     .catch((err) => console.error("Audit log failed:", err));
 
   const message = buildRampSms(driver.lang as Lang, driver.name, String(ramp), rampTime);

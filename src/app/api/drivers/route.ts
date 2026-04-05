@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
 
   // Write audit log
   db.insert(auditLogs)
-    .values({ driverId: driver.id, action: "created", ramp: null, note: null })
+    .values({ driverId: driver.id, action: "created", ramp: null, note: null, operatorName: null })
     .catch((err) => console.error("Audit log failed:", err));
 
   const message = buildConfirmSms(lang as Lang, num);

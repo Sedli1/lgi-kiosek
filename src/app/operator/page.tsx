@@ -10,11 +10,11 @@ interface Driver {
   id: number; num: number; name: string; phone: string; spz: string;
   firm: string; order: string | null; type: string; lang: string;
   status: string; ramp: string | null; rampTime: string | null;
-  rampAssignedAt: string | null; doneAt: string | null; createdAt: string;
+  rampAssignedAt: string | null; doneAt: string | null; note: string | null; createdAt: string;
   smsLogs: SmsLog[];
 }
 interface Ramp { id: number; name: string; status: string; note: string | null; }
-interface AuditLog { id: number; driverId: number | null; action: string; ramp: string | null; note: string | null; createdAt: string; }
+interface AuditLog { id: number; driverId: number | null; action: string; ramp: string | null; note: string | null; operatorName: string | null; createdAt: string; }
 interface StatsData {
   perRamp: { ramp: string; count: number; avgMinutes: number | null }[];
   perFirm: { firm: string; count: number; avgMinutes: number | null }[];
@@ -32,7 +32,7 @@ type StatsPeriod = "today" | "week" | "month" | "all";
 // ── Constants ──────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, string> = { vyklada: "Vykládka", naklada: "Nakládka", obe: "Vykl.+Nakl." };
-const ACTION_LABELS: Record<string, string> = { created: "Registrace", ramp_assigned: "Rampa přidělena", done: "Dokončeno" };
+const ACTION_LABELS: Record<string, string> = { created: "Registrace", ramp_assigned: "Rampa přidělena", done: "Dokončeno", note_added: "Poznámka" };
 const PERIOD_LABELS: Record<StatsPeriod, string> = { today: "Dnes", week: "7 dní", month: "30 dní", all: "Vše" };
 
 // ── Helpers ────────────────────────────────────────────────
@@ -136,6 +136,9 @@ export default function OperatorPage() {
   const [password, setPassword] = useState(() =>
     typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("pass") ?? "") : ""
   );
+  const [operatorName, setOperatorName] = useState(() =>
+    typeof window !== "undefined" ? (localStorage.getItem("operatorName") ?? "") : ""
+  );
   const [authed, setAuthed] = useState(false);
   const [authError, setAuthError] = useState(false);
   const [rampModal, setRampModal] = useState<Driver | null>(null);
@@ -151,6 +154,15 @@ export default function OperatorPage() {
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("today");
   const prevDriverIds = useRef<Set<number>>(new Set());
   const notifGranted = useRef(false);
+  const [editModal, setEditModal] = useState<Driver | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", spz: "", firm: "", phone: "", type: "", order: "" });
+  const [editSending, setEditSending] = useState(false);
+  const [addModal, setAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" });
+  const [addSending, setAddSending] = useState(false);
+  const [confirmDoneId, setConfirmDoneId] = useState<number | null>(null);
+  const [noteModal, setNoteModal] = useState<Driver | null>(null);
+  const [noteText, setNoteText] = useState("");
 
   // Request notification permission
   useEffect(() => {
@@ -170,12 +182,19 @@ export default function OperatorPage() {
       es.onopen = () => setConnected(true);
       es.onmessage = (e) => {
         const data = JSON.parse(e.data) as { drivers: Driver[]; ramps: Ramp[]; auditLogs: AuditLog[] };
-        // Detect new drivers → chime + browser notification
+        // Detect new drivers → chime + browser notification + tab blink
+        let hasNew = false;
         for (const d of data.drivers) {
           if (!prevDriverIds.current.has(d.id) && prevDriverIds.current.size > 0) {
+            hasNew = true;
             playChime();
             if (notifGranted.current) new Notification("Nový řidič", { body: `${d.name} · ${d.spz} · ${d.firm}`, icon: "/icon-192.png" });
           }
+        }
+        if (hasNew) {
+          let on = true;
+          const blink = setInterval(() => { document.title = on ? "🔔 Nový řidič!" : "LGI Operátor"; on = !on; }, 700);
+          setTimeout(() => { clearInterval(blink); document.title = "LGI Operátor"; }, 10000);
         }
         prevDriverIds.current = new Set(data.drivers.map(d => d.id));
         setDrivers(data.drivers.map(d => ({ ...d, smsLogs: (d as any).smsLogs ?? [] })));
@@ -194,7 +213,7 @@ export default function OperatorPage() {
     setStats(null);
     const from = periodToFrom(statsPeriod);
     const qs = from ? `&from=${encodeURIComponent(from)}` : "";
-    fetch(`/api/stats?pass=${encodeURIComponent(password)}${qs}`, { headers: { "x-operator-pass": password } })
+    fetch(`/api/stats?pass=${encodeURIComponent(password)}${qs}`, { headers: authHeaders() })
       .then(r => r.json()).then(d => setStats(d as StatsData)).catch(() => {});
   }, [tab, authed, password, statsPeriod]);
 
@@ -210,36 +229,74 @@ export default function OperatorPage() {
     setRampConflict(drivers.find(d => d.status === "ramp" && d.ramp === selectedRamp && d.id !== rampModal.id) ?? null);
   }, [selectedRamp, rampModal, drivers]);
 
+  function authHeaders(extra?: Record<string, string>): Record<string, string> {
+    return { "x-operator-pass": password, ...(operatorName ? { "x-operator-name": operatorName } : {}), ...extra };
+  }
+
   function handleAuth(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length >= 3) { setAuthed(true); setAuthError(false); } else setAuthError(true);
+    if (password.length >= 3) {
+      if (operatorName) localStorage.setItem("operatorName", operatorName);
+      setAuthed(true); setAuthError(false);
+    } else setAuthError(true);
   }
 
   async function assignRamp() {
     if (!rampModal) return;
     setSending(true);
     await fetch(`/api/drivers/${rampModal.id}/ramp?pass=${encodeURIComponent(password)}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json", "x-operator-pass": password },
+      method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime }),
     });
     setSending(false); setRampModal(null); setRampConflict(null);
   }
 
   async function markDone(id: number) {
-    await fetch(`/api/drivers/${id}/done?pass=${encodeURIComponent(password)}`, { method: "PATCH", headers: { "x-operator-pass": password } });
+    await fetch(`/api/drivers/${id}/done?pass=${encodeURIComponent(password)}`, { method: "PATCH", headers: authHeaders() });
   }
 
   async function toggleRampRepair(ramp: Ramp) {
     const newStatus = ramp.status === "repair" ? "available" : "repair";
     await fetch(`/api/ramps?pass=${encodeURIComponent(password)}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json", "x-operator-pass": password },
+      method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ id: ramp.id, status: newStatus }),
     });
   }
 
   async function resetData() {
-    await fetch(`/api/reset?pass=${encodeURIComponent(password)}&confirm=yes`, { method: "DELETE", headers: { "x-operator-pass": password } });
+    await fetch(`/api/reset?pass=${encodeURIComponent(password)}&confirm=yes`, { method: "DELETE", headers: authHeaders() });
     setShowResetDialog(false);
+  }
+
+  async function saveEdit() {
+    if (!editModal) return;
+    setEditSending(true);
+    await fetch(`/api/drivers/${editModal.id}?pass=${encodeURIComponent(password)}`, {
+      method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(editForm),
+    });
+    setEditSending(false);
+    setEditModal(null);
+  }
+
+  async function addDriver() {
+    if (!addForm.name || !addForm.phone || !addForm.spz || !addForm.firm) return;
+    setAddSending(true);
+    const res = await fetch(`/api/drivers?pass=${encodeURIComponent(password)}`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(addForm),
+    });
+    setAddSending(false);
+    if (res.ok) { setAddModal(false); setAddForm({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" }); }
+  }
+
+  async function saveNote() {
+    if (!noteModal) return;
+    await fetch(`/api/drivers/${noteModal.id}?pass=${encodeURIComponent(password)}`, {
+      method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ note: noteText }),
+    });
+    setNoteModal(null);
   }
 
   // ── Login screen ──────────────────────────────────────────
@@ -250,6 +307,8 @@ export default function OperatorPage() {
         <form onSubmit={handleAuth} className="bg-white rounded-2xl p-8 w-80 shadow-xl">
           <h1 className="text-xl font-bold text-gray-900 mb-1">Operátorský panel</h1>
           <p className="text-gray-500 text-sm mb-6">Zadejte heslo pro přístup</p>
+          <input type="text" value={operatorName} onChange={e => setOperatorName(e.target.value)} placeholder="Vaše jméno (nepovinné)"
+            className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Heslo"
             className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
           {authError && <p className="text-red-500 text-sm mb-3">Nesprávné heslo</p>}
@@ -302,6 +361,10 @@ export default function OperatorPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => { setAddForm({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" }); setAddModal(true); }}
+            className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white font-bold" title="Přidat řidiče ručně">
+            + Přidat
+          </button>
           <button onClick={() => setShowResetDialog(true)} className="text-xs bg-red-600/70 hover:bg-red-600 px-2 py-1 rounded text-white" title="Smazat všechna data (testování)">
             🗑 Reset
           </button>
@@ -347,42 +410,92 @@ export default function OperatorPage() {
             </div>
 
             {/* Active drivers */}
-            {tab === "active" && (
-              filteredActive.length === 0
-                ? <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">
-                    {search || filterType!=="all" ? "Žádné výsledky" : "Žádní aktivní řidiči"}
+            {tab === "active" && (() => {
+              const sorted = [...filteredActive].sort((a, b) => parseDate(a.createdAt).getTime() - parseDate(b.createdAt).getTime());
+              const waitSorted = sorted.filter(d => d.status === "wait");
+              const rampSorted = sorted.filter(d => d.status === "ramp");
+
+              const renderRow = (d: Driver) => (
+                <div key={d.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50 flex-wrap">
+                  <div className="w-9 h-9 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+                    {d.num}
                   </div>
-                : <div className="divide-y divide-gray-100 overflow-y-auto">
-                    {filteredActive.map(d => (
-                      <div key={d.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50">
-                        <div className="w-9 h-9 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-                          {d.num}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 text-sm">{d.name}</div>
-                          <div className="text-xs text-gray-500 truncate">
-                            {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
-                            {d.order && ` · #${d.order}`}
-                          </div>
-                        </div>
-                        <LiveElapsed createdAt={d.createdAt} status={d.status} />
-                        <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />
-                        {d.status === "wait" && (
-                          <button onClick={() => { setRampModal(d); setSelectedRamp("1"); setSelectedTime(nowTime()); }}
-                            className="bg-[#065A82] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#054a6b] flex-shrink-0">
-                            Přidělit rampu
-                          </button>
-                        )}
-                        {d.status === "ramp" && (
-                          <button onClick={() => markDone(d.id)}
-                            className="bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-green-700 flex-shrink-0">
-                            Hotovo ✓
-                          </button>
-                        )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-900 text-sm">{d.name}</div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
+                      {d.order && ` · #${d.order}`}
+                    </div>
+                    {d.note && (
+                      <div className="text-xs text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 mt-0.5 inline-block max-w-full truncate" title={d.note}>
+                        📝 {d.note}
                       </div>
-                    ))}
+                    )}
                   </div>
-            )}
+                  <LiveElapsed createdAt={d.createdAt} status={d.status} />
+                  <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />
+                  <button onClick={() => { setNoteModal(d); setNoteText(d.note ?? ""); }}
+                    className="text-gray-400 hover:text-amber-600 text-xs px-2 py-1 rounded hover:bg-amber-50 flex-shrink-0" title="Interní poznámka">
+                    📝
+                  </button>
+                  <button onClick={() => { setEditModal(d); setEditForm({ name: d.name, spz: d.spz, firm: d.firm, phone: d.phone, type: d.type, order: d.order ?? "" }); }}
+                    className="text-gray-400 hover:text-[#065A82] text-xs px-2 py-1 rounded hover:bg-gray-100 flex-shrink-0" title="Upravit záznam">
+                    ✏
+                  </button>
+                  {d.status === "wait" && (
+                    <button onClick={() => { setRampModal(d); setSelectedRamp("1"); setSelectedTime(nowTime()); }}
+                      className="bg-[#065A82] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#054a6b] flex-shrink-0">
+                      Přidělit rampu
+                    </button>
+                  )}
+                  {d.status === "ramp" && confirmDoneId !== d.id && (
+                    <button onClick={() => setConfirmDoneId(d.id)}
+                      className="bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-green-700 flex-shrink-0">
+                      Hotovo ✓
+                    </button>
+                  )}
+                  {d.status === "ramp" && confirmDoneId === d.id && (
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button onClick={() => { markDone(d.id); setConfirmDoneId(null); }}
+                        className="bg-green-700 text-white text-xs px-2 py-1.5 rounded-lg font-semibold">
+                        Potvrdit
+                      </button>
+                      <button onClick={() => setConfirmDoneId(null)}
+                        className="bg-gray-200 text-gray-600 text-xs px-2 py-1.5 rounded-lg">
+                        Zrušit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+
+              if (filteredActive.length === 0) return (
+                <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">
+                  {search || filterType!=="all" ? "Žádné výsledky" : "Žádní aktivní řidiči"}
+                </div>
+              );
+
+              return (
+                <div className="overflow-y-auto divide-y divide-gray-100">
+                  {waitSorted.length > 0 && (
+                    <>
+                      <div className="px-4 py-1.5 bg-amber-50 flex items-center gap-2 sticky top-0">
+                        <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Čeká ({waitSorted.length})</span>
+                      </div>
+                      {waitSorted.map(renderRow)}
+                    </>
+                  )}
+                  {rampSorted.length > 0 && (
+                    <>
+                      <div className="px-4 py-1.5 bg-green-50 flex items-center gap-2 sticky top-0">
+                        <span className="text-xs font-semibold text-green-700 uppercase tracking-wide">Na rampě ({rampSorted.length})</span>
+                      </div>
+                      {rampSorted.map(renderRow)}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* History */}
             {tab === "history" && (
@@ -420,12 +533,14 @@ export default function OperatorPage() {
                           {auditData.slice(0,30).map(a => {
                             const drv = drivers.find(d => d.id === a.driverId);
                             return (
-                              <div key={a.id} className="flex items-center gap-2 text-xs text-gray-500">
-                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${a.action==="created"?"bg-blue-50 text-blue-600":a.action==="ramp_assigned"?"bg-green-50 text-green-600":"bg-gray-100 text-gray-500"}`}>
+                              <div key={a.id} className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${a.action==="created"?"bg-blue-50 text-blue-600":a.action==="ramp_assigned"?"bg-green-50 text-green-600":a.action==="note_added"?"bg-amber-50 text-amber-600":"bg-gray-100 text-gray-500"}`}>
                                   {ACTION_LABELS[a.action]??a.action}
                                 </span>
                                 {drv && <span>{drv.name} · {drv.spz}</span>}
                                 {a.ramp && <span>R{a.ramp}</span>}
+                                {a.note && a.action==="note_added" && <span className="italic truncate max-w-[120px]">"{a.note}"</span>}
+                                {a.operatorName && <span className="text-[#065A82] font-medium">{a.operatorName}</span>}
                                 <span className="ml-auto">{parseDate(a.createdAt).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})}</span>
                               </div>
                             );
@@ -512,7 +627,7 @@ export default function OperatorPage() {
         </div>
 
         {/* RIGHT: Sidebar */}
-        <div className="w-64 flex-shrink-0 border-l border-gray-200 bg-white overflow-y-auto p-4 space-y-4 hidden lg:flex lg:flex-col">
+        <div className="w-56 flex-shrink-0 border-l border-gray-200 bg-white overflow-y-auto p-4 space-y-4 hidden md:flex md:flex-col">
           {/* Ramp grid */}
           <div>
             <div className="flex items-center gap-1.5 mb-2">
@@ -556,6 +671,106 @@ export default function OperatorPage() {
           </div>
         </div>
       </div>
+
+      {/* Note modal */}
+      {noteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Interní poznámka</h3>
+            <p className="text-gray-500 text-sm mb-4">{noteModal.name} · {noteModal.spz} — pouze pro operátory, neposílá se řidiči</p>
+            <textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={3}
+              placeholder="např. čeká na nakládku ze skladu B…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setNoteModal(null)} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50">Zrušit</button>
+              {noteModal.note && (
+                <button onClick={() => { setNoteText(""); saveNote(); }}
+                  className="px-4 border border-red-200 text-red-500 py-2.5 rounded-xl font-medium hover:bg-red-50">Smazat</button>
+              )}
+              <button onClick={saveNote} className="flex-1 bg-amber-500 text-white py-2.5 rounded-xl font-medium hover:bg-amber-600">Uložit</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit driver modal */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Upravit záznam #{editModal.num}</h3>
+            <div className="space-y-3">
+              {([["name","Jméno"],["spz","SPZ"],["firm","Firma"],["phone","Telefon"],["order","Zakázka"]] as const).map(([k,label]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                  <input value={editForm[k]} onChange={e => setEditForm(f => ({ ...f, [k]: k === "spz" ? e.target.value.toUpperCase() : e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]"/>
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Typ</label>
+                <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]">
+                  <option value="vyklada">Vykládka</option>
+                  <option value="naklada">Nakládka</option>
+                  <option value="obe">Vykl.+Nakl.</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setEditModal(null)} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50">Zrušit</button>
+              <button onClick={saveEdit} disabled={editSending} className="flex-1 bg-[#065A82] text-white py-2.5 rounded-xl font-medium hover:bg-[#054a6b] disabled:opacity-60">
+                {editSending ? "Ukládám…" : "Uložit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add driver modal */}
+      {addModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Přidat řidiče ručně</h3>
+            <div className="space-y-3">
+              {([["name","Jméno *"],["spz","SPZ *"],["firm","Firma *"],["phone","Telefon *"],["order","Zakázka"]] as const).map(([k,label]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                  <input value={addForm[k as keyof typeof addForm]} onChange={e => setAddForm(f => ({ ...f, [k]: k === "spz" ? e.target.value.toUpperCase() : e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]"/>
+                </div>
+              ))}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Typ</label>
+                  <select value={addForm.type} onChange={e => setAddForm(f => ({ ...f, type: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]">
+                    <option value="vyklada">Vykládka</option>
+                    <option value="naklada">Nakládka</option>
+                    <option value="obe">Vykl.+Nakl.</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Jazyk</label>
+                  <select value={addForm.lang} onChange={e => setAddForm(f => ({ ...f, lang: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]">
+                    <option value="cs">CS</option>
+                    <option value="sk">SK</option>
+                    <option value="pl">PL</option>
+                    <option value="de">DE</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setAddModal(false)} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50">Zrušit</button>
+              <button onClick={addDriver} disabled={addSending || !addForm.name || !addForm.phone || !addForm.spz || !addForm.firm}
+                className="flex-1 bg-[#065A82] text-white py-2.5 rounded-xl font-medium hover:bg-[#054a6b] disabled:opacity-60">
+                {addSending ? "Přidávám…" : "Přidat"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reset confirmation dialog */}
       {showResetDialog && (
