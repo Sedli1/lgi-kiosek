@@ -155,14 +155,13 @@ export default function OperatorPage() {
   const prevDriverIds = useRef<Set<number>>(new Set());
   const notifGranted = useRef(false);
   const [editModal, setEditModal] = useState<Driver | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", spz: "", firm: "", phone: "", type: "", order: "" });
+  const [editForm, setEditForm] = useState({ name: "", spz: "", firm: "", phone: "", type: "", order: "", note: "" });
   const [editSending, setEditSending] = useState(false);
   const [addModal, setAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" });
   const [addSending, setAddSending] = useState(false);
   const [confirmDoneId, setConfirmDoneId] = useState<number | null>(null);
-  const [noteModal, setNoteModal] = useState<Driver | null>(null);
-  const [noteText, setNoteText] = useState("");
+  const [showLegend, setShowLegend] = useState(false);
 
   // Request notification permission
   useEffect(() => {
@@ -273,7 +272,7 @@ export default function OperatorPage() {
     setEditSending(true);
     await fetch(`/api/drivers/${editModal.id}?pass=${encodeURIComponent(password)}`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(editForm),
+      body: JSON.stringify({ ...editForm, note: editForm.note.trim() || null }),
     });
     setEditSending(false);
     setEditModal(null);
@@ -290,14 +289,6 @@ export default function OperatorPage() {
     if (res.ok) { setAddModal(false); setAddForm({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" }); }
   }
 
-  async function saveNote() {
-    if (!noteModal) return;
-    await fetch(`/api/drivers/${noteModal.id}?pass=${encodeURIComponent(password)}`, {
-      method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ note: noteText }),
-    });
-    setNoteModal(null);
-  }
 
   // ── Login screen ──────────────────────────────────────────
 
@@ -386,10 +377,10 @@ export default function OperatorPage() {
               placeholder="Hledat jméno, SPZ, firma…"
               className="flex-1 min-w-[180px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82] bg-white"
             />
-            <div className="flex gap-1">
-              {([["all","Vše"],["vyklada","Vykládka"],["naklada","Nakládka"],["obe","Obojí"]] as const).map(([val,label]) => (
+            <div className="flex bg-gray-100 rounded-lg p-0.5 flex-shrink-0">
+              {([["all","Vše"],["vyklada","Vykl."],["naklada","Nakl."],["obe","Obojí"]] as const).map(([val,label]) => (
                 <button key={val} onClick={() => setFilterType(val)}
-                  className={`px-3 py-2 rounded-lg text-sm border transition whitespace-nowrap ${filterType===val?"bg-[#065A82] text-white border-[#065A82]":"bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition whitespace-nowrap ${filterType===val?"bg-white text-[#065A82] shadow-sm":"text-gray-500 hover:text-gray-700"}`}>
                   {label}
                 </button>
               ))}
@@ -401,9 +392,9 @@ export default function OperatorPage() {
             <div className="flex border-b border-gray-100">
               {(["active","history","stats"] as const).map(t => (
                 <button key={t} onClick={() => setTab(t)}
-                  className={`flex-1 py-2.5 text-sm font-medium transition ${tab===t ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
-                  {t==="active" && `Aktivní (${active.length})`}
-                  {t==="history" && `Historie (${history.length})`}
+                  className={`flex-1 py-2 text-xs font-medium transition flex items-center justify-center gap-1.5 ${tab===t ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
+                  {t==="active" && <>Aktivní <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab==="active"?"bg-[#065A82] text-white":"bg-gray-200 text-gray-600"}`}>{active.length}</span></>}
+                  {t==="history" && <>Historie <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab==="history"?"bg-[#065A82] text-white":"bg-gray-200 text-gray-600"}`}>{history.length}</span></>}
                   {t==="stats" && "Statistiky"}
                 </button>
               ))}
@@ -416,12 +407,12 @@ export default function OperatorPage() {
               const rampSorted = sorted.filter(d => d.status === "ramp");
 
               const renderRow = (d: Driver) => (
-                <div key={d.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-50 flex-wrap">
-                  <div className="w-9 h-9 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+                <div key={d.id} className="group px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50">
+                  <div className="w-8 h-8 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                     {d.num}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 text-sm">{d.name}</div>
+                    <div className="font-medium text-gray-900 text-sm leading-tight">{d.name}</div>
                     <div className="text-xs text-gray-500 truncate">
                       {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
                       {d.order && ` · #${d.order}`}
@@ -433,14 +424,12 @@ export default function OperatorPage() {
                     )}
                   </div>
                   <LiveElapsed createdAt={d.createdAt} status={d.status} />
-                  <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />
-                  <button onClick={() => { setNoteModal(d); setNoteText(d.note ?? ""); }}
-                    className="text-gray-400 hover:text-amber-600 text-xs px-2 py-1 rounded hover:bg-amber-50 flex-shrink-0" title="Interní poznámka">
-                    📝
-                  </button>
-                  <button onClick={() => { setEditModal(d); setEditForm({ name: d.name, spz: d.spz, firm: d.firm, phone: d.phone, type: d.type, order: d.order ?? "" }); }}
-                    className="text-gray-400 hover:text-[#065A82] text-xs px-2 py-1 rounded hover:bg-gray-100 flex-shrink-0" title="Upravit záznam">
-                    ✏
+                  {d.status === "ramp" && <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />}
+                  <button
+                    onClick={() => { setEditModal(d); setEditForm({ name: d.name, spz: d.spz, firm: d.firm, phone: d.phone, type: d.type, order: d.order ?? "", note: d.note ?? "" }); }}
+                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-[#065A82] text-xs px-2 py-1 rounded hover:bg-gray-100 flex-shrink-0 transition-opacity"
+                    title="Detail / Upravit">
+                    ···
                   </button>
                   {d.status === "wait" && (
                     <button onClick={() => { setRampModal(d); setSelectedRamp("1"); setSelectedTime(nowTime()); }}
@@ -479,16 +468,16 @@ export default function OperatorPage() {
                 <div className="overflow-y-auto divide-y divide-gray-100">
                   {waitSorted.length > 0 && (
                     <>
-                      <div className="px-4 py-1.5 bg-amber-50 flex items-center gap-2 sticky top-0">
-                        <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Čeká ({waitSorted.length})</span>
+                      <div className="px-4 py-1 bg-amber-50 flex items-center gap-2 sticky top-0 border-b border-amber-100">
+                        <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-widest">Čeká ({waitSorted.length})</span>
                       </div>
                       {waitSorted.map(renderRow)}
                     </>
                   )}
                   {rampSorted.length > 0 && (
                     <>
-                      <div className="px-4 py-1.5 bg-green-50 flex items-center gap-2 sticky top-0">
-                        <span className="text-xs font-semibold text-green-700 uppercase tracking-wide">Na rampě ({rampSorted.length})</span>
+                      <div className="px-4 py-1 bg-green-50 flex items-center gap-2 sticky top-0 border-b border-green-100">
+                        <span className="text-[10px] font-semibold text-green-700 uppercase tracking-widest">Na rampě ({rampSorted.length})</span>
                       </div>
                       {rampSorted.map(renderRow)}
                     </>
@@ -632,8 +621,23 @@ export default function OperatorPage() {
           <div>
             <div className="flex items-center gap-1.5 mb-2">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Rampy</h3>
-              <span className="w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center cursor-help flex-shrink-0"
-                title="Kliknutím na rampu ji označíte jako V opravě / přepnete zpět na Volnou.">?</span>
+              <div className="relative ml-auto">
+                <button onClick={() => setShowLegend(v => !v)}
+                  className="w-4 h-4 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-500 text-[10px] font-bold flex items-center justify-center cursor-pointer flex-shrink-0">?</button>
+                {showLegend && (
+                  <div className="absolute right-0 top-5 z-20 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-44 text-xs text-gray-500 space-y-2">
+                    <div className="font-medium text-gray-700 text-[11px] uppercase tracking-wide mb-1">Stav rampy</div>
+                    <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-400 flex-shrink-0"/>Volná</div>
+                    <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400 flex-shrink-0"/>Obsazená</div>
+                    <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-400 flex-shrink-0"/>Oprava</div>
+                    <div className="border-t border-gray-100 pt-2 font-medium text-gray-700 text-[11px] uppercase tracking-wide mb-1">Čekací čas</div>
+                    <div className="flex items-center gap-1.5"><span className="w-6 h-3 rounded bg-gray-100 flex-shrink-0"/>&lt; 15 min</div>
+                    <div className="flex items-center gap-1.5"><span className="w-6 h-3 rounded bg-amber-100 flex-shrink-0"/>15–30 min</div>
+                    <div className="flex items-center gap-1.5"><span className="w-6 h-3 rounded bg-red-100 flex-shrink-0"/>&gt; 30 min</div>
+                    <div className="border-t border-gray-100 pt-1 text-[10px] text-gray-400">Klik na rampu = Oprava/Volná</div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {rampRows.map(r => {
@@ -655,43 +659,8 @@ export default function OperatorPage() {
             </div>
           </div>
 
-          {/* Legend */}
-          <div className="text-xs text-gray-400 space-y-1">
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block"/>Volná</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block"/>Obsazená</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-400 inline-block"/>Oprava</div>
-          </div>
-
-          {/* Timer legend */}
-          <div className="border-t border-gray-100 pt-3 text-xs text-gray-400 space-y-1">
-            <div className="font-medium text-gray-600 mb-1">Čekací čas</div>
-            <div className="flex items-center gap-1.5"><span className="w-8 h-4 rounded bg-gray-100 inline-block"/>&lt; 15 min</div>
-            <div className="flex items-center gap-1.5"><span className="w-8 h-4 rounded bg-amber-100 inline-block"/>15–30 min</div>
-            <div className="flex items-center gap-1.5"><span className="w-8 h-4 rounded bg-red-100 inline-block"/>&gt; 30 min</div>
-          </div>
         </div>
       </div>
-
-      {/* Note modal */}
-      {noteModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-1">Interní poznámka</h3>
-            <p className="text-gray-500 text-sm mb-4">{noteModal.name} · {noteModal.spz} — pouze pro operátory, neposílá se řidiči</p>
-            <textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={3}
-              placeholder="např. čeká na nakládku ze skladu B…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
-            <div className="flex gap-3 mt-4">
-              <button onClick={() => setNoteModal(null)} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50">Zrušit</button>
-              {noteModal.note && (
-                <button onClick={() => { setNoteText(""); saveNote(); }}
-                  className="px-4 border border-red-200 text-red-500 py-2.5 rounded-xl font-medium hover:bg-red-50">Smazat</button>
-              )}
-              <button onClick={saveNote} className="flex-1 bg-amber-500 text-white py-2.5 rounded-xl font-medium hover:bg-amber-600">Uložit</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Edit driver modal */}
       {editModal && (
@@ -714,6 +683,12 @@ export default function OperatorPage() {
                   <option value="naklada">Nakládka</option>
                   <option value="obe">Vykl.+Nakl.</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Interní poznámka <span className="text-gray-400 font-normal">(jen pro operátory)</span></label>
+                <textarea value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))} rows={2}
+                  placeholder="např. čeká na nakládku ze skladu B…"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"/>
               </div>
             </div>
             <div className="flex gap-3 mt-5">
