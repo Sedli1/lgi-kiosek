@@ -283,10 +283,6 @@ export default function KioskPage() {
 
           <p className="text-xl text-gray-700 mb-5 leading-relaxed">{t.confirmInstr}</p>
 
-          <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left">
-            <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{t.confirmSmsLabel}</div>
-            <p className="text-sm text-gray-800 leading-relaxed">{confirmed.confirmSms}</p>
-          </div>
 
           <div className="flex flex-col items-center gap-1 mb-4">
             <svg width="108" height="108" className="-rotate-90">
