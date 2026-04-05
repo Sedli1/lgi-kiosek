@@ -118,9 +118,10 @@ function LiveElapsed({ createdAt, status }: { createdAt: string; status: string 
     : mins < 15 ? "text-gray-500 bg-gray-100"
     : mins < 30 ? "text-amber-700 bg-amber-100"
     : "text-red-700 bg-red-100 animate-pulse";
+  const label = status === "ramp" ? "🔧 rampa" : "⏱ čeká";
   return (
     <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${color}`} title="Čas od registrace">
-      {fmtElapsed(ms)}
+      {label} {fmtElapsed(ms)}
     </span>
   );
 }
@@ -145,6 +146,7 @@ export default function OperatorPage() {
   const [connected, setConnected] = useState(false);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
+  const [showResetDialog, setShowResetDialog] = useState(false);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("today");
   const prevDriverIds = useRef<Set<number>>(new Set());
@@ -236,8 +238,8 @@ export default function OperatorPage() {
   }
 
   async function resetData() {
-    if (!window.confirm("⚠️ Opravdu smazat VŠECHNA data? (jen pro testování)")) return;
     await fetch(`/api/reset?pass=${encodeURIComponent(password)}&confirm=yes`, { method: "DELETE", headers: { "x-operator-pass": password } });
+    setShowResetDialog(false);
   }
 
   // ── Login screen ──────────────────────────────────────────
@@ -300,7 +302,7 @@ export default function OperatorPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={resetData} className="text-xs bg-red-600/70 hover:bg-red-600 px-2 py-1 rounded text-white" title="Smazat všechna data (testování)">
+          <button onClick={() => setShowResetDialog(true)} className="text-xs bg-red-600/70 hover:bg-red-600 px-2 py-1 rounded text-white" title="Smazat všechna data (testování)">
             🗑 Reset
           </button>
           <button onClick={() => setAuthed(false)} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
@@ -321,13 +323,14 @@ export default function OperatorPage() {
               placeholder="Hledat jméno, SPZ, firma…"
               className="flex-1 min-w-[180px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82] bg-white"
             />
-            <select value={filterType} onChange={e => setFilterType(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#065A82]">
-              <option value="all">Všechny typy</option>
-              <option value="vyklada">Vykládka</option>
-              <option value="naklada">Nakládka</option>
-              <option value="obe">Vykl.+Nakl.</option>
-            </select>
+            <div className="flex gap-1">
+              {([["all","Vše"],["vyklada","Vykládka"],["naklada","Nakládka"],["obe","Obojí"]] as const).map(([val,label]) => (
+                <button key={val} onClick={() => setFilterType(val)}
+                  className={`px-3 py-2 rounded-lg text-sm border transition whitespace-nowrap ${filterType===val?"bg-[#065A82] text-white border-[#065A82]":"bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Tabs */}
@@ -372,7 +375,7 @@ export default function OperatorPage() {
                         )}
                         {d.status === "ramp" && (
                           <button onClick={() => markDone(d.id)}
-                            className="bg-gray-500 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-gray-600 flex-shrink-0">
+                            className="bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-green-700 flex-shrink-0">
                             Hotovo ✓
                           </button>
                         )}
@@ -459,30 +462,47 @@ export default function OperatorPage() {
                     <p className="text-xs text-gray-500">Celkem dokončeno: <strong>{stats.totalDone}</strong></p>
                     <div>
                       <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Průměr na rampě</h3>
-                      {stats.perRamp.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (
-                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                          {stats.perRamp.map(r => (
-                            <div key={r.ramp} className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
-                              <div className="text-lg font-black text-[#065A82]">R{r.ramp}</div>
-                              <div className="text-xs text-gray-500">{r.count}× ø {fmtDuration(r.avgMinutes)}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {stats.perRamp.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
+                        const maxCount = Math.max(...stats.perRamp.map(r => r.count), 1);
+                        return (
+                          <div className="space-y-1.5">
+                            {stats.perRamp.map(r => (
+                              <div key={r.ramp} className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
+                                <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                                  <div className="h-5 rounded-full bg-[#065A82]/80 flex items-center px-2 transition-all"
+                                    style={{ width: `${Math.max((r.count / maxCount) * 100, 4)}%` }}>
+                                    {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
+                                  </div>
+                                </div>
+                                <span className="text-xs text-gray-500 w-14 text-right flex-shrink-0">ø {fmtDuration(r.avgMinutes)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div>
                       <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Top firmy</h3>
-                      {stats.perFirm.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (
-                        <div className="space-y-1">
-                          {stats.perFirm.map(f => (
-                            <div key={f.firm} className="flex items-center gap-2 text-sm">
-                              <span className="flex-1 truncate text-gray-800">{f.firm}</span>
-                              <span className="text-gray-400 text-xs">{f.count}×</span>
-                              <span className="text-[#065A82] text-xs font-medium w-14 text-right">ø {fmtDuration(f.avgMinutes)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {stats.perFirm.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
+                        const maxCount = Math.max(...stats.perFirm.map(f => f.count), 1);
+                        return (
+                          <div className="space-y-1.5">
+                            {stats.perFirm.map(f => (
+                              <div key={f.firm} className="flex items-center gap-2">
+                                <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0">{f.firm}</span>
+                                <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                                  <div className="h-5 rounded-full bg-[#1D9E75]/80 flex items-center px-2 transition-all"
+                                    style={{ width: `${Math.max((f.count / maxCount) * 100, 4)}%` }}>
+                                    {f.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{f.count}×</span>}
+                                  </div>
+                                </div>
+                                <span className="text-xs text-gray-500 w-14 text-right flex-shrink-0">ø {fmtDuration(f.avgMinutes)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -495,7 +515,11 @@ export default function OperatorPage() {
         <div className="w-64 flex-shrink-0 border-l border-gray-200 bg-white overflow-y-auto p-4 space-y-4 hidden lg:flex lg:flex-col">
           {/* Ramp grid */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Rampy</h3>
+            <div className="flex items-center gap-1.5 mb-2">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Rampy</h3>
+              <span className="w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center cursor-help flex-shrink-0"
+                title="Kliknutím na rampu ji označíte jako V opravě / přepnete zpět na Volnou.">?</span>
+            </div>
             <div className="grid grid-cols-5 gap-1.5">
               {rampRows.map(r => {
                 const driver = driverOnRamp.get(r.name);
@@ -514,7 +538,6 @@ export default function OperatorPage() {
                 );
               })}
             </div>
-            <p className="text-[10px] text-gray-400 mt-1.5">Klik = oprava/volná</p>
           </div>
 
           {/* Legend */}
@@ -533,6 +556,26 @@ export default function OperatorPage() {
           </div>
         </div>
       </div>
+
+      {/* Reset confirmation dialog */}
+      {showResetDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Smazat všechna data?</h3>
+            <p className="text-gray-500 text-sm mb-6">Tato akce je nevratná. Budou smazáni všichni řidiči, SMS logy a audit záznamy. Používejte pouze pro testování.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowResetDialog(false)}
+                className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50">
+                Zrušit
+              </button>
+              <button onClick={resetData}
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-medium hover:bg-red-700">
+                Smazat vše
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Ramp assignment modal */}
       {rampModal && (

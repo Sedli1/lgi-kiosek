@@ -398,12 +398,20 @@ export default function KioskPage() {
           </svg>
         </button>
 
-        <div className="text-center mb-10">
-          <div className="text-white/60 text-xs uppercase tracking-widest mb-3">LGI Logistics · Driver Registration</div>
+        <div className="text-center mb-8">
+          {/* Truck icon */}
+          <div className="mb-6 flex justify-center">
+            <div className="w-24 h-24 rounded-3xl bg-white/10 flex items-center justify-center">
+              <svg className="w-14 h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
+              </svg>
+            </div>
+          </div>
+          <div className="text-white/60 text-xs uppercase tracking-widest mb-2">LGI Logistics · Driver Registration</div>
           <h1 className="text-white text-5xl font-black mb-3">Vítejte!</h1>
           <p className="text-blue-100 text-xl font-medium mb-1">Zaregistrujte se k vykládce nebo nakládce.</p>
-          <p className="text-blue-300 text-base">Prosím zvolte jazyk / Please select your language</p>
-          <div className="mt-4 text-blue-200/60 text-sm space-y-0.5">
+          <p className="text-blue-300 text-base mb-4">Prosím zvolte jazyk / Please select your language</p>
+          <div className="text-blue-200/60 text-sm space-y-0.5">
             <div>Witamy! Zarejestruj się do rozładunku.</div>
             <div>Willkommen! Bitte melden Sie sich zur Be-/Entladung an.</div>
           </div>
@@ -417,10 +425,7 @@ export default function KioskPage() {
               className="flex flex-col items-center gap-3 bg-white rounded-2xl p-6 shadow-lg active:scale-95 transition-transform hover:bg-blue-50"
             >
               <FlagIcon code={code} size={64} />
-              <div className="text-center">
-                <div className="text-xl font-bold text-gray-900">{LANG_META[code].name}</div>
-                <div className="text-sm text-gray-500">{LANG_META[code].dialCode}</div>
-              </div>
+              <div className="text-xl font-bold text-gray-900">{LANG_META[code].name}</div>
             </button>
           ))}
         </div>
@@ -498,7 +503,7 @@ export default function KioskPage() {
   function inputClass(f: FormField) {
     const st = fieldState(f);
     return [
-      "w-full border-2 rounded-xl px-4 py-4 text-lg focus:outline-none transition-colors",
+      "w-full border-2 rounded-xl px-4 py-4 text-lg focus:outline-none transition-colors placeholder:text-gray-400",
       st === "ok" ? "border-green-400 bg-green-50/30" :
       st === "err" ? "border-red-400 bg-red-50/30" :
       "border-gray-200 focus:border-[#065A82]",
@@ -535,7 +540,10 @@ export default function KioskPage() {
       {/* Form */}
       <main className="flex-1 p-4 overflow-y-auto">
         <form onSubmit={handleSubmit} className="max-w-xl mx-auto space-y-4">
-          <h2 className="text-2xl font-bold text-gray-900">{t.title}</h2>
+          <div className="mb-2">
+            <h2 className="text-3xl font-black text-gray-900 leading-tight">{t.title}</h2>
+            <p className="text-gray-500 text-sm mt-1">{t.subtitle}</p>
+          </div>
 
           {/* Type operation — FIRST, large tap buttons */}
           <div>
