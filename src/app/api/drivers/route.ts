@@ -74,16 +74,20 @@ export async function POST(req: NextRequest) {
 
   const message = buildConfirmSms(lang as Lang, num);
 
-  sendSms(phone, message)
-    .then(() =>
-      db.insert(smsLogs).values({
-        driverId: driver.id,
-        type: "confirm",
-        phone,
-        message,
-      })
-    )
-    .catch((err) => console.error("SMS send failed:", err));
+  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+  const { ctx } = await getCloudflareContext({ async: true });
+  ctx.waitUntil(
+    sendSms(phone, message)
+      .then(() =>
+        db.insert(smsLogs).values({
+          driverId: driver.id,
+          type: "confirm",
+          phone,
+          message,
+        })
+      )
+      .catch((err) => console.error("SMS confirm failed:", err))
+  );
 
   return NextResponse.json({ ...driver, confirmSms: message }, { status: 201 });
 }

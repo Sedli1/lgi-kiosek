@@ -45,16 +45,20 @@ export async function PATCH(
 
   const message = buildRampSms(driver.lang as Lang, driver.name, String(ramp), rampTime);
 
-  sendSms(driver.phone, message)
-    .then(() =>
-      db.insert(smsLogs).values({
-        driverId: driver.id,
-        type: "ramp",
-        phone: driver.phone,
-        message,
-      })
-    )
-    .catch((err) => console.error("SMS send failed:", err));
+  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+  const { ctx } = await getCloudflareContext({ async: true });
+  ctx.waitUntil(
+    sendSms(driver.phone, message)
+      .then(() =>
+        db.insert(smsLogs).values({
+          driverId: driver.id,
+          type: "ramp",
+          phone: driver.phone,
+          message,
+        })
+      )
+      .catch((err) => console.error("SMS ramp failed:", err))
+  );
 
   return NextResponse.json({ ...updated, rampSms: message });
 }
