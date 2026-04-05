@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { drivers, smsLogs, auditLogs } from "@/db/schema";
-import { buildConfirmSms, sendSms, Lang } from "@/lib/sms";
+import { buildConfirmSms, Lang } from "@/lib/sms";
 import { requireOperator } from "@/lib/auth";
 import { desc, eq } from "drizzle-orm";
 
@@ -73,21 +73,6 @@ export async function POST(req: NextRequest) {
     .catch((err) => console.error("Audit log failed:", err));
 
   const message = buildConfirmSms(lang as Lang, num);
-
-  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-  const { ctx } = await getCloudflareContext({ async: true });
-  ctx.waitUntil(
-    sendSms(phone, message)
-      .then(() =>
-        db.insert(smsLogs).values({
-          driverId: driver.id,
-          type: "confirm",
-          phone,
-          message,
-        })
-      )
-      .catch((err) => console.error("SMS confirm failed:", err))
-  );
 
   return NextResponse.json({ ...driver, confirmSms: message }, { status: 201 });
 }
