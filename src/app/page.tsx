@@ -1,15 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { T, Lang } from "@/lib/i18n";
 
 // ── Types ─────────────────────────────────────────────────
 
 interface ConfirmData { num: number; confirmSms: string; }
 type FormField = "name" | "phone" | "spz" | "firm" | "order";
-type KbLayer = "default" | "shift" | "diak" | "num";
 type FormValues = Record<FormField, string>;
-
 const RESET_SECONDS = 90;
 const OFFLINE_QUEUE_KEY = "lgi-offline-queue";
 
@@ -20,57 +18,6 @@ const LANG_META: Record<Lang, { name: string; dialCode: string }> = {
   sk: { name: "Slovenčina", dialCode: "+421" },
   pl: { name: "Polski",     dialCode: "+48"  },
   de: { name: "Deutsch",    dialCode: "+49"  },
-};
-
-// ── Keyboard layouts ───────────────────────────────────────
-
-const KB_ROWS_DEFAULT = [
-  ["q","w","e","r","t","y","u","i","o","p"],
-  ["a","s","d","f","g","h","j","k","l"],
-  ["⇧","z","x","c","v","b","n","m","⌫"],
-  ["✱"," ","↵"],
-];
-
-const KB_ROWS_SHIFT = [
-  ["Q","W","E","R","T","Y","U","I","O","P"],
-  ["A","S","D","F","G","H","J","K","L"],
-  ["⇩","Z","X","C","V","B","N","M","⌫"],
-  ["✱"," ","↵"],
-];
-
-const KB_ROWS_NUM = [
-  ["1","2","3"],
-  ["4","5","6"],
-  ["7","8","9"],
-  ["+","0","⌫"],
-  ["↵"],
-];
-
-const DIAK_KEYS: Record<Lang, string[][]> = {
-  cs: [
-    ["á","č","ď","é","ě","í","ň","ó","ř","š"],
-    ["ť","ú","ů","ý","ž","Á","Č","Š","Ž","Ř"],
-    [".","!","?",",","-","_","@","0","1","⌫"],
-    ["ABC"," ","↵"],
-  ],
-  sk: [
-    ["á","ä","č","ď","é","í","ĺ","ľ","ň","ó"],
-    ["ô","ŕ","š","ť","ú","ý","ž","Á","Š","Ž"],
-    [".","!","?",",","-","_","@","0","1","⌫"],
-    ["ABC"," ","↵"],
-  ],
-  pl: [
-    ["ą","ć","ę","ł","ń","ó","ś","ź","ż","Ą"],
-    ["Ć","Ę","Ł","Ń","Ó","Ś","Ź","Ż","@","-"],
-    [".","!","?",",","_","0","1","2","3","⌫"],
-    ["ABC"," ","↵"],
-  ],
-  de: [
-    ["ä","ö","ü","ß","Ä","Ö","Ü","@","-","_"],
-    [".","!","?",",",":","(",")",'"',"'","⌫"],
-    ["1","2","3","4","5","6","7","8","9","0"],
-    ["ABC"," ","↵"],
-  ],
 };
 
 // ── Flag SVGs ─────────────────────────────────────────────
@@ -115,100 +62,6 @@ function FlagIcon({ code, size = 40 }: { code: string; size?: number }) {
   );
 }
 
-// ── Custom virtual keyboard ───────────────────────────────
-
-function VirtualKeyboard({
-  layer,
-  lang,
-  onChar,
-  onBackspace,
-  onEnter,
-  onSpace,
-  onToggleShift,
-  onToggleDiak,
-  onClose,
-}: {
-  layer: KbLayer;
-  lang: Lang;
-  onChar: (c: string) => void;
-  onBackspace: () => void;
-  onEnter: () => void;
-  onSpace: () => void;
-  onToggleShift: () => void;
-  onToggleDiak: () => void;
-  onClose: () => void;
-}) {
-  const rows =
-    layer === "num"
-      ? KB_ROWS_NUM
-      : layer === "diak"
-      ? DIAK_KEYS[lang]
-      : layer === "shift"
-      ? KB_ROWS_SHIFT
-      : KB_ROWS_DEFAULT;
-
-  function handleKey(key: string) {
-    if (key === "⌫") { onBackspace(); return; }
-    if (key === "↵") { onEnter(); return; }
-    if (key === " ") { onSpace(); return; }
-    if (key === "⇧") { onToggleShift(); return; }
-    if (key === "⇩") { onToggleShift(); return; }
-    if (key === "✱" || key === "ABC") { onToggleDiak(); return; }
-    onChar(key);
-  }
-
-  function keyClass(key: string) {
-    const isWide = key === " " || key === "⇧" || key === "⇩" || key === "✱" || key === "ABC" || key === "↵";
-    const isAction = key === "⌫" || key === "↵" || key === "⇧" || key === "⇩" || key === "✱" || key === "ABC";
-    const isEnter = key === "↵";
-    const isSpace = key === " ";
-    const isShiftActive = layer === "shift" && (key === "⇩");
-    const isDiakActive = layer === "diak" && (key === "ABC");
-
-    return [
-      "flex items-center justify-center rounded-xl font-medium select-none active:scale-95 transition-transform cursor-pointer",
-      "h-14 min-w-[44px]",
-      isSpace ? "flex-[4]" : isWide ? "flex-[1.6]" : "flex-1",
-      isEnter ? "bg-[#065A82] text-white text-base shadow-md" :
-      isShiftActive || isDiakActive ? "bg-[#065A82] text-white shadow" :
-      isAction ? "bg-gray-300 text-gray-800 text-xl shadow" :
-      "bg-white text-gray-900 text-lg shadow",
-    ].join(" ");
-  }
-
-  return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-gray-200 border-t-2 border-gray-300 px-2 pt-2 pb-3 shadow-2xl">
-      <div className="flex justify-between items-center mb-1.5 px-1">
-        <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">
-          {layer === "num" ? "Čísla" : layer === "diak" ? "Diakritika" : "Klávesnice"}
-        </span>
-        <button
-          onMouseDown={(e) => { e.preventDefault(); onClose(); }}
-          className="text-xs text-gray-500 bg-gray-300 rounded px-2 py-0.5 hover:bg-gray-400"
-        >
-          Zavřít ✕
-        </button>
-      </div>
-      <div className="space-y-1.5 max-w-2xl mx-auto">
-        {rows.map((row, ri) => (
-          <div key={ri} className="flex gap-1.5 justify-center">
-            {row.map((key, ki) => (
-              <button
-                key={`${ri}-${ki}-${key}`}
-                onMouseDown={(e) => { e.preventDefault(); handleKey(key); }}
-                onTouchStart={(e) => { e.preventDefault(); handleKey(key); }}
-                className={keyClass(key)}
-              >
-                {key === " " ? "Mezera" : key}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ── Validation ────────────────────────────────────────────
 
 function validateField(field: FormField, value: string): string | null {
@@ -229,12 +82,9 @@ export default function KioskPage() {
   const [dialCode, setDialCode] = useState("+420");
   const [typeValue, setTypeValue] = useState("");
   const [touched, setTouched] = useState<Set<FormField>>(new Set());
-  const [kbField, setKbField] = useState<FormField | null>(null);
-  const [kbLayer, setKbLayer] = useState<KbLayer>("default");
   const [countdown, setCountdown] = useState(RESET_SECONDS);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
-  const activeInputRef = useRef<HTMLInputElement | null>(null);
 
   const t = lang ? T[lang] : T.cs;
 
@@ -290,7 +140,6 @@ export default function KioskPage() {
     setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
     setTypeValue("");
     setTouched(new Set());
-    setKbField(null);
   }
 
   function toggleFullscreen() {
@@ -302,38 +151,7 @@ export default function KioskPage() {
   function selectLang(l: Lang) {
     setLang(l);
     setDialCode(LANG_META[l].dialCode);
-    setKbField(null);
-    setKbLayer("default");
   }
-
-  // Keyboard handlers
-  function openKb(field: FormField) {
-    setKbField(field);
-    setKbLayer(field === "phone" ? "num" : "default");
-  }
-
-  function closeKb() { setKbField(null); }
-
-  function kbChar(c: string) {
-    if (!kbField) return;
-    setValues((v) => {
-      let next = v[kbField] + c;
-      if (kbField === "spz") next = next.toUpperCase();
-      return { ...v, [kbField]: next };
-    });
-    setTouched((t) => new Set(t).add(kbField));
-    if (kbLayer === "shift") setKbLayer("default"); // auto-return after one uppercase
-  }
-
-  function kbBackspace() {
-    if (!kbField) return;
-    setValues((v) => ({ ...v, [kbField]: v[kbField].slice(0, -1) }));
-  }
-
-  function kbEnter() { closeKb(); }
-  function kbSpace() { kbChar(" "); }
-  function kbToggleShift() { setKbLayer((l) => l === "shift" ? "default" : "shift"); }
-  function kbToggleDiak() { setKbLayer((l) => l === "diak" ? "default" : "diak"); }
 
   // Direct input typing (hardware keyboard / native)
   function handleInputChange(field: FormField, raw: string) {
@@ -354,7 +172,6 @@ export default function KioskPage() {
     const hasErrors = requiredFields.some((f) => validateField(f, values[f]) !== null) || !typeValue;
     if (hasErrors) return;
 
-    closeKb();
     setLoading(true);
 
     const phone = values.phone.startsWith("+") ? values.phone : `${dialCode}${values.phone}`;
@@ -507,14 +324,11 @@ export default function KioskPage() {
       st === "ok" ? "border-green-400 bg-green-50/30" :
       st === "err" ? "border-red-400 bg-red-50/30" :
       "border-gray-200 focus:border-[#065A82]",
-      kbField === f ? "ring-2 ring-[#065A82]/40" : "",
     ].join(" ");
   }
 
-  const showKb = kbField !== null;
-
   return (
-    <div className={`min-h-screen bg-gray-50 flex flex-col ${showKb ? "pb-[320px]" : ""}`}>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
       <header className="bg-[#065A82] text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div>
@@ -578,9 +392,7 @@ export default function KioskPage() {
             </label>
             <input
               value={values.name}
-
               placeholder="Jan Novák"
-              onFocus={() => openKb("name")}
               onChange={(e) => handleInputChange("name", e.target.value)}
               className={inputClass("name")}
             />
@@ -596,7 +408,6 @@ export default function KioskPage() {
               <select
                 value={dialCode}
                 onChange={(e) => setDialCode(e.target.value)}
-                onFocus={closeKb}
                 className="border-2 border-gray-200 rounded-xl px-2 py-4 text-base font-medium bg-white focus:border-[#065A82] focus:outline-none"
               >
                 <option value="+420">🇨🇿 +420</option>
@@ -609,9 +420,7 @@ export default function KioskPage() {
               </select>
               <input
                 value={values.phone}
-  
                 placeholder="123 456 789"
-                onFocus={() => openKb("phone")}
                 onChange={(e) => handleInputChange("phone", e.target.value)}
                 className={`flex-1 ${inputClass("phone")}`}
                 inputMode="tel"
@@ -628,9 +437,7 @@ export default function KioskPage() {
               </label>
               <input
                 value={values.spz}
-  
                 placeholder="1AB 2345"
-                onFocus={() => openKb("spz")}
                 onChange={(e) => handleInputChange("spz", e.target.value)}
                 className={inputClass("spz")}
                 style={{ textTransform: "uppercase" }}
@@ -643,9 +450,7 @@ export default function KioskPage() {
               </label>
               <input
                 value={values.firm}
-  
                 placeholder="Dopravní firma s.r.o."
-                onFocus={() => openKb("firm")}
                 onChange={(e) => handleInputChange("firm", e.target.value)}
                 className={inputClass("firm")}
               />
@@ -658,11 +463,9 @@ export default function KioskPage() {
             <label className="block text-sm font-medium text-gray-600 mb-1">{t.order}</label>
             <input
               value={values.order}
-
               placeholder="ORD-12345"
-              onFocus={() => openKb("order")}
               onChange={(e) => handleInputChange("order", e.target.value)}
-              className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 text-lg focus:outline-none focus:border-[#065A82] transition-colors"
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 text-lg focus:outline-none focus:border-[#065A82] transition-colors placeholder:text-gray-400"
             />
           </div>
 
@@ -687,20 +490,6 @@ export default function KioskPage() {
         </form>
       </main>
 
-      {/* Virtual keyboard overlay */}
-      {showKb && kbField && lang && (
-        <VirtualKeyboard
-          layer={kbLayer}
-          lang={lang}
-          onChar={kbChar}
-          onBackspace={kbBackspace}
-          onEnter={kbEnter}
-          onSpace={kbSpace}
-          onToggleShift={kbToggleShift}
-          onToggleDiak={kbToggleDiak}
-          onClose={closeKb}
-        />
-      )}
     </div>
   );
 }
