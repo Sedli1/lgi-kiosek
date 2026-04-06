@@ -377,10 +377,10 @@ export default function OperatorPage() {
               placeholder="Hledat jméno, SPZ, firma…"
               className="flex-1 min-w-[180px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82] bg-white"
             />
-            <div className="flex bg-gray-100 rounded-lg p-0.5 flex-shrink-0">
-              {([["all","Vše"],["vyklada","Vykl."],["naklada","Nakl."],["obe","Obojí"]] as const).map(([val,label]) => (
+            <div className="flex gap-1">
+              {([["all","Vše"],["vyklada","Vykládka"],["naklada","Nakládka"],["obe","Obojí"]] as const).map(([val,label]) => (
                 <button key={val} onClick={() => setFilterType(val)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition whitespace-nowrap ${filterType===val?"bg-white text-[#065A82] shadow-sm":"text-gray-500 hover:text-gray-700"}`}>
+                  className={`px-3 py-2 rounded-lg text-sm border transition whitespace-nowrap ${filterType===val?"bg-[#065A82] text-white border-[#065A82]":"bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
                   {label}
                 </button>
               ))}
@@ -392,7 +392,7 @@ export default function OperatorPage() {
             <div className="flex border-b border-gray-100">
               {(["active","history","stats"] as const).map(t => (
                 <button key={t} onClick={() => setTab(t)}
-                  className={`flex-1 py-2 text-xs font-medium transition flex items-center justify-center gap-1.5 ${tab===t ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
+                  className={`flex-1 py-2.5 text-sm font-medium transition flex items-center justify-center gap-1.5 ${tab===t ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
                   {t==="active" && <>Aktivní <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab==="active"?"bg-[#065A82] text-white":"bg-gray-200 text-gray-600"}`}>{active.length}</span></>}
                   {t==="history" && <>Historie <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${tab==="history"?"bg-[#065A82] text-white":"bg-gray-200 text-gray-600"}`}>{history.length}</span></>}
                   {t==="stats" && "Statistiky"}
@@ -427,7 +427,7 @@ export default function OperatorPage() {
                   {d.status === "ramp" && <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />}
                   <button
                     onClick={() => { setEditModal(d); setEditForm({ name: d.name, spz: d.spz, firm: d.firm, phone: d.phone, type: d.type, order: d.order ?? "", note: d.note ?? "" }); }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-[#065A82] text-xs px-2 py-1 rounded hover:bg-gray-100 flex-shrink-0 transition-opacity"
+                    className="text-gray-300 hover:text-[#065A82] hover:bg-gray-100 text-sm px-2 py-1 rounded flex-shrink-0 leading-none"
                     title="Detail / Upravit">
                     ···
                   </button>
@@ -468,16 +468,16 @@ export default function OperatorPage() {
                 <div className="overflow-y-auto divide-y divide-gray-100">
                   {waitSorted.length > 0 && (
                     <>
-                      <div className="px-4 py-1 bg-amber-50 flex items-center gap-2 sticky top-0 border-b border-amber-100">
-                        <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-widest">Čeká ({waitSorted.length})</span>
+                      <div className="px-4 py-1.5 bg-amber-50 flex items-center gap-2 sticky top-0">
+                        <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Čeká ({waitSorted.length})</span>
                       </div>
                       {waitSorted.map(renderRow)}
                     </>
                   )}
                   {rampSorted.length > 0 && (
                     <>
-                      <div className="px-4 py-1 bg-green-50 flex items-center gap-2 sticky top-0 border-b border-green-100">
-                        <span className="text-[10px] font-semibold text-green-700 uppercase tracking-widest">Na rampě ({rampSorted.length})</span>
+                      <div className="px-4 py-1.5 bg-green-50 flex items-center gap-2 sticky top-0">
+                        <span className="text-xs font-semibold text-green-700 uppercase tracking-wide">Na rampě ({rampSorted.length})</span>
                       </div>
                       {rampSorted.map(renderRow)}
                     </>
@@ -621,23 +621,8 @@ export default function OperatorPage() {
           <div>
             <div className="flex items-center gap-1.5 mb-2">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Rampy</h3>
-              <div className="relative ml-auto">
-                <button onClick={() => setShowLegend(v => !v)}
-                  className="w-4 h-4 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-500 text-[10px] font-bold flex items-center justify-center cursor-pointer flex-shrink-0">?</button>
-                {showLegend && (
-                  <div className="absolute right-0 top-5 z-20 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-44 text-xs text-gray-500 space-y-2">
-                    <div className="font-medium text-gray-700 text-[11px] uppercase tracking-wide mb-1">Stav rampy</div>
-                    <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-400 flex-shrink-0"/>Volná</div>
-                    <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400 flex-shrink-0"/>Obsazená</div>
-                    <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-400 flex-shrink-0"/>Oprava</div>
-                    <div className="border-t border-gray-100 pt-2 font-medium text-gray-700 text-[11px] uppercase tracking-wide mb-1">Čekací čas</div>
-                    <div className="flex items-center gap-1.5"><span className="w-6 h-3 rounded bg-gray-100 flex-shrink-0"/>&lt; 15 min</div>
-                    <div className="flex items-center gap-1.5"><span className="w-6 h-3 rounded bg-amber-100 flex-shrink-0"/>15–30 min</div>
-                    <div className="flex items-center gap-1.5"><span className="w-6 h-3 rounded bg-red-100 flex-shrink-0"/>&gt; 30 min</div>
-                    <div className="border-t border-gray-100 pt-1 text-[10px] text-gray-400">Klik na rampu = Oprava/Volná</div>
-                  </div>
-                )}
-              </div>
+              <span className="w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center cursor-help flex-shrink-0"
+                title="Kliknutím na rampu ji označíte jako V opravě / přepnete zpět na Volnou.">?</span>
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {rampRows.map(r => {
@@ -657,6 +642,21 @@ export default function OperatorPage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Legend */}
+          <div className="text-xs text-gray-400 space-y-1">
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block"/>Volná</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block"/>Obsazená</div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-400 inline-block"/>Oprava</div>
+          </div>
+
+          {/* Timer legend */}
+          <div className="border-t border-gray-100 pt-3 text-xs text-gray-400 space-y-1">
+            <div className="font-medium text-gray-600 mb-1">Čekací čas</div>
+            <div className="flex items-center gap-1.5"><span className="w-8 h-4 rounded bg-gray-100 inline-block"/>&lt; 15 min</div>
+            <div className="flex items-center gap-1.5"><span className="w-8 h-4 rounded bg-amber-100 inline-block"/>15–30 min</div>
+            <div className="flex items-center gap-1.5"><span className="w-8 h-4 rounded bg-red-100 inline-block"/>&gt; 30 min</div>
           </div>
 
         </div>
