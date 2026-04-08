@@ -89,6 +89,17 @@ function playChime() {
   } catch {}
 }
 
+function fmtHistoryDate(s: string | null): string {
+  if (!s) return "—";
+  const d = new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+  const now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const time = d.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return `dnes ${time}`;
+  if (d.toDateString() === yesterday.toDateString()) return `včera ${time}`;
+  return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) + ` ${time}`;
+}
+
 function exportCsv(rows: DriverRow[]) {
   const hdr = ["#","Jméno","Telefon","SPZ","Firma","Typ","Rampa","Čas příjezdu","Přiděleno","Dokončeno","Min na rampě"];
   const lines = rows.map(r => {
@@ -102,6 +113,25 @@ function exportCsv(rows: DriverRow[]) {
   const blob = new Blob(["\uFEFF"+[hdr.join(","),...lines].join("\n")], {type:"text/csv;charset=utf-8;"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = `lgi-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
+// ── Overdue row wrapper ────────────────────────────────────
+
+function LiveDriverRow({ driver, children }: { driver: Driver; children: React.ReactNode }) {
+  const [overdue, setOverdue] = useState(
+    () => driver.status === "wait" && Date.now() - parseDate(driver.createdAt).getTime() > 30 * 60000
+  );
+  useEffect(() => {
+    if (driver.status !== "wait") return;
+    const t = setInterval(() => setOverdue(Date.now() - parseDate(driver.createdAt).getTime() > 30 * 60000), 15000);
+    return () => clearInterval(t);
+  }, [driver.createdAt, driver.status]);
+  return (
+    <div className={`group px-4 py-3 flex items-center gap-3 hover:bg-gray-50 ${overdue ? "border-l-[3px] border-red-500 bg-red-50/40" : ""}`}>
+      {overdue && <span className="text-red-500 text-base flex-shrink-0 leading-none" title="Čeká déle než 30 minut">⚠</span>}
+      {children}
+    </div>
+  );
 }
 
 // ── Live elapsed badge ─────────────────────────────────────
@@ -162,6 +192,7 @@ export default function OperatorPage() {
   const [addSending, setAddSending] = useState(false);
   const [confirmDoneId, setConfirmDoneId] = useState<number | null>(null);
   const [showLegend, setShowLegend] = useState(false);
+  const [historyFirmFilter, setHistoryFirmFilter] = useState("all");
 
   // Request notification permission
   useEffect(() => {
@@ -378,7 +409,7 @@ export default function OperatorPage() {
               className="flex-1 min-w-[180px] border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82] bg-white"
             />
             <div className="flex gap-1">
-              {([["all","Vše"],["vyklada","Vykládka"],["naklada","Nakládka"],["obe","Obojí"]] as const).map(([val,label]) => (
+              {([["all","Vše"],["vyklada","Vykládka"],["naklada","Nakládka"],["obe","Vykl.+Nakl."]] as const).map(([val,label]) => (
                 <button key={val} onClick={() => setFilterType(val)}
                   className={`px-3 py-2 rounded-lg text-sm border transition whitespace-nowrap ${filterType===val?"bg-[#065A82] text-white border-[#065A82]":"bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
                   {label}
@@ -407,7 +438,7 @@ export default function OperatorPage() {
               const rampSorted = sorted.filter(d => d.status === "ramp");
 
               const renderRow = (d: Driver) => (
-                <div key={d.id} className="group px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50">
+                <LiveDriverRow key={d.id} driver={d}>
                   <div className="w-8 h-8 rounded-full bg-[#065A82] text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                     {d.num}
                   </div>
@@ -455,7 +486,7 @@ export default function OperatorPage() {
                       </button>
                     </div>
                   )}
-                </div>
+                </LiveDriverRow>
               );
 
               if (filteredActive.length === 0) return (
@@ -487,15 +518,30 @@ export default function OperatorPage() {
             })()}
 
             {/* History */}
-            {tab === "history" && (
-              filteredHistory.length === 0
+            {tab === "history" && (() => {
+              const historyFirms = [...new Set(history.map(d => d.firm))].sort();
+              const displayHistory = filteredHistory.filter(d => historyFirmFilter === "all" || d.firm === historyFirmFilter);
+              return filteredHistory.length === 0
                 ? <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">Žádná historie</div>
-                : <div className="divide-y divide-gray-100 overflow-y-auto">
-                    {filteredHistory.map(d => {
-                      const mins = d.rampAssignedAt && d.doneAt
+                : <div className="flex flex-col overflow-hidden">
+                    {historyFirms.length > 1 && (
+                      <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Firma:</span>
+                        <select value={historyFirmFilter} onChange={e => setHistoryFirmFilter(e.target.value)}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                          <option value="all">Všechny</option>
+                          {historyFirms.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    <div className="divide-y divide-gray-100 overflow-y-auto">
+                    {displayHistory.map(d => {
+                      const rampMins = d.rampAssignedAt && d.doneAt
                         ? Math.round((parseDate(d.doneAt).getTime() - parseDate(d.rampAssignedAt).getTime()) / 60000) : null;
+                      const waitMins = d.rampAssignedAt
+                        ? Math.round((parseDate(d.rampAssignedAt).getTime() - parseDate(d.createdAt).getTime()) / 60000) : null;
                       return (
-                        <div key={d.id} className="px-4 py-3 flex items-center gap-3 opacity-70">
+                        <div key={d.id} className="px-4 py-3 flex items-center gap-3 opacity-75">
                           <div className="w-9 h-9 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
                             {d.num}
                           </div>
@@ -503,14 +549,16 @@ export default function OperatorPage() {
                             <div className="text-sm font-medium text-gray-700">{d.name}</div>
                             <div className="text-xs text-gray-400 truncate">
                               {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
-                              {d.ramp && ` · Rampa ${d.ramp}`}
+                              {d.ramp && ` · R${d.ramp}`}
                             </div>
                           </div>
-                          <div className="text-right text-xs text-gray-400 flex-shrink-0 space-y-0.5">
-                            <div>{parseDate(d.createdAt).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})}</div>
-                            {mins !== null && <div className="text-[#065A82] font-medium">{fmtDuration(mins)}</div>}
+                          <div className="text-right text-xs flex-shrink-0 space-y-0.5">
+                            <div className="text-gray-400">{fmtHistoryDate(d.createdAt)}</div>
+                            <div className="flex gap-1.5 justify-end">
+                              {waitMins !== null && <span className="text-amber-600" title="Čas čekání">⏱ {fmtDuration(waitMins)}</span>}
+                              {rampMins !== null && <span className="text-[#065A82] font-medium" title="Čas na rampě">🔧 {fmtDuration(rampMins)}</span>}
+                            </div>
                           </div>
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Hotovo</span>
                         </div>
                       );
                     })}
@@ -538,7 +586,8 @@ export default function OperatorPage() {
                       </details>
                     )}
                   </div>
-            )}
+                  </div>;
+            })()}
 
             {/* Stats */}
             {tab === "stats" && (
@@ -565,7 +614,10 @@ export default function OperatorPage() {
                   <div className="space-y-5">
                     <p className="text-xs text-gray-500">Celkem dokončeno: <strong>{stats.totalDone}</strong></p>
                     <div>
-                      <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Průměr na rampě</h3>
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Využití ramp</h3>
+                        <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
+                      </div>
                       {stats.perRamp.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
                         const maxCount = Math.max(...stats.perRamp.map(r => r.count), 1);
                         return (
@@ -579,7 +631,7 @@ export default function OperatorPage() {
                                     {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
                                   </div>
                                 </div>
-                                <span className="text-xs text-gray-500 w-14 text-right flex-shrink-0">ø {fmtDuration(r.avgMinutes)}</span>
+                                <span className="text-xs text-gray-500 w-16 text-right flex-shrink-0">ø {fmtDuration(r.avgMinutes)}</span>
                               </div>
                             ))}
                           </div>
@@ -587,21 +639,24 @@ export default function OperatorPage() {
                       })()}
                     </div>
                     <div>
-                      <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Top firmy</h3>
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Firmy</h3>
+                        <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
+                      </div>
                       {stats.perFirm.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
                         const maxCount = Math.max(...stats.perFirm.map(f => f.count), 1);
                         return (
                           <div className="space-y-1.5">
                             {stats.perFirm.map(f => (
                               <div key={f.firm} className="flex items-center gap-2">
-                                <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0">{f.firm}</span>
+                                <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0" title={f.firm}>{f.firm}</span>
                                 <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
                                   <div className="h-5 rounded-full bg-[#1D9E75]/80 flex items-center px-2 transition-all"
                                     style={{ width: `${Math.max((f.count / maxCount) * 100, 4)}%` }}>
                                     {f.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{f.count}×</span>}
                                   </div>
                                 </div>
-                                <span className="text-xs text-gray-500 w-14 text-right flex-shrink-0">ø {fmtDuration(f.avgMinutes)}</span>
+                                <span className="text-xs text-gray-500 w-16 text-right flex-shrink-0">ø {fmtDuration(f.avgMinutes)}</span>
                               </div>
                             ))}
                           </div>
@@ -625,19 +680,23 @@ export default function OperatorPage() {
                 title="Kliknutím na rampu ji označíte jako V opravě / přepnete zpět na Volnou.">?</span>
             </div>
             <div className="grid grid-cols-5 gap-1.5">
-              {rampRows.map(r => {
+              {[...rampRows].sort((a, b) => Number(a.name) - Number(b.name)).map(r => {
                 const driver = driverOnRamp.get(r.name);
                 const isOccupied = occupiedRampNames.has(r.name);
                 const isRepair = r.status === "repair";
+                const shortName = driver ? driver.name.split(" ")[0].slice(0, 6) : null;
                 return (
                   <button key={r.id} title={driver?`${driver.name} · ${driver.spz}`:isRepair?`R${r.name}: Oprava`:`R${r.name}: Volná`}
                     onClick={() => toggleRampRepair(r)}
-                    className={`relative flex flex-col items-center justify-center h-11 rounded-lg font-bold text-xs transition ${
+                    className={`relative flex flex-col items-center justify-center h-14 rounded-lg font-bold text-xs transition gap-0.5 ${
                       isOccupied ? "bg-red-100 text-red-700 border border-red-300"
                       : isRepair ? "bg-gray-100 text-gray-400 border border-gray-200"
                       : "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"}`}>
-                    {r.name}
-                    {isOccupied && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full"/>}
+                    <span className="text-sm font-bold leading-none">{r.name}</span>
+                    {isOccupied && shortName && (
+                      <span className="text-[9px] font-medium text-red-600 leading-tight truncate w-full text-center px-0.5">{shortName}</span>
+                    )}
+                    {isRepair && <span className="text-[9px] text-gray-400 leading-tight">oprava</span>}
                   </button>
                 );
               })}
