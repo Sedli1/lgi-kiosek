@@ -14,8 +14,8 @@ export async function PATCH(
 
   const { id } = await params;
   const operatorName = req.headers.get("x-operator-name") ?? null;
-  const body = (await req.json()) as Record<string, string>;
-  const { ramp, rampTime: operatorTime } = body;
+  const body = (await req.json()) as { ramp: string; rampTime?: string; skipSms?: boolean };
+  const { ramp, rampTime: operatorTime, skipSms } = body;
 
   if (!ramp || !/^\d{1,2}$/.test(String(ramp))) {
     return NextResponse.json({ error: "Invalid ramp" }, { status: 400 });
@@ -39,27 +39,27 @@ export async function PATCH(
     .where(eq(drivers.id, Number(id)))
     .returning();
 
-  // Write audit log
+  const auditNote = skipSms
+    ? `Rampa ${ramp}, čas: ${rampTime} — SMS neposlána`
+    : `Rampa ${ramp}, čas: ${rampTime}`;
+
   db.insert(auditLogs)
-    .values({ driverId: driver.id, action: "ramp_assigned", ramp: String(ramp), note: `Čas příjezdu: ${rampTime}`, operatorName })
+    .values({ driverId: driver.id, action: "ramp_assigned", ramp: String(ramp), note: auditNote, operatorName })
     .catch((err) => console.error("Audit log failed:", err));
 
-  const message = buildRampSms(driver.lang as Lang, driver.name, String(ramp), rampTime);
+  if (!skipSms) {
+    const message = buildRampSms(driver.lang as Lang, driver.name, String(ramp), rampTime);
+    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+    const { ctx } = await getCloudflareContext({ async: true });
+    ctx.waitUntil(
+      sendSms(driver.phone, message)
+        .then(() =>
+          db.insert(smsLogs).values({ driverId: driver.id, type: "ramp", phone: driver.phone, message })
+        )
+        .catch((err) => console.error("SMS ramp failed:", err))
+    );
+    return NextResponse.json({ ...updated, rampSms: message });
+  }
 
-  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-  const { ctx } = await getCloudflareContext({ async: true });
-  ctx.waitUntil(
-    sendSms(driver.phone, message)
-      .then(() =>
-        db.insert(smsLogs).values({
-          driverId: driver.id,
-          type: "ramp",
-          phone: driver.phone,
-          message,
-        })
-      )
-      .catch((err) => console.error("SMS ramp failed:", err))
-  );
-
-  return NextResponse.json({ ...updated, rampSms: message });
+  return NextResponse.json({ ...updated, rampSms: null });
 }

@@ -32,7 +32,7 @@ type StatsPeriod = "today" | "week" | "month" | "all";
 // ── Constants ──────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, string> = { vyklada: "Vykládka", naklada: "Nakládka", obe: "Vykl.+Nakl." };
-const ACTION_LABELS: Record<string, string> = { created: "Registrace", ramp_assigned: "Rampa přidělena", done: "Dokončeno", note_added: "Poznámka" };
+const ACTION_LABELS: Record<string, string> = { created: "Registrace", ramp_assigned: "Rampa přidělena", done: "Dokončeno", note_added: "Poznámka", edited: "Úprava záznamu", cancelled: "Zrušeno operátorem" };
 const PERIOD_LABELS: Record<StatsPeriod, string> = { today: "Dnes", week: "7 dní", month: "30 dní", all: "Vše" };
 
 // ── Helpers ────────────────────────────────────────────────
@@ -193,6 +193,11 @@ export default function OperatorPage() {
   const [confirmDoneId, setConfirmDoneId] = useState<number | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [historyFirmFilter, setHistoryFirmFilter] = useState("all");
+  const [historyDayFilter, setHistoryDayFilter] = useState("all");
+  const [skipSms, setSkipSms] = useState(false);
+  const [cancelConfirmId, setCancelConfirmId] = useState<number | null>(null);
+  const [statsFirmSearch, setStatsFirmSearch] = useState("");
+  const [statsTypeFilter, setStatsTypeFilter] = useState("all");
 
   // Request notification permission
   useEffect(() => {
@@ -242,10 +247,10 @@ export default function OperatorPage() {
     if (tab !== "stats" || !authed) return;
     setStats(null);
     const from = periodToFrom(statsPeriod);
-    const qs = from ? `&from=${encodeURIComponent(from)}` : "";
+    const qs = (from ? `&from=${encodeURIComponent(from)}` : "") + (statsTypeFilter !== "all" ? `&type=${statsTypeFilter}` : "");
     fetch(`/api/stats?pass=${encodeURIComponent(password)}${qs}`, { headers: authHeaders() })
       .then(r => r.json()).then(d => setStats(d as StatsData)).catch(() => {});
-  }, [tab, authed, password, statsPeriod]);
+  }, [tab, authed, password, statsPeriod, statsTypeFilter]);
 
   // Auto-login from URL
   useEffect(() => {
@@ -276,9 +281,14 @@ export default function OperatorPage() {
     setSending(true);
     await fetch(`/api/drivers/${rampModal.id}/ramp?pass=${encodeURIComponent(password)}`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime }),
+      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime, skipSms }),
     });
-    setSending(false); setRampModal(null); setRampConflict(null);
+    setSending(false); setRampModal(null); setRampConflict(null); setSkipSms(false);
+  }
+
+  async function cancelDriver(id: number) {
+    await fetch(`/api/drivers/${id}?pass=${encodeURIComponent(password)}`, { method: "DELETE", headers: authHeaders() });
+    setCancelConfirmId(null);
   }
 
   async function markDone(id: number) {
@@ -458,10 +468,23 @@ export default function OperatorPage() {
                   {d.status === "ramp" && <StatusBadge status={d.status} ramp={d.ramp} rampTime={d.rampTime} />}
                   <button
                     onClick={() => { setEditModal(d); setEditForm({ name: d.name, spz: d.spz, firm: d.firm, phone: d.phone, type: d.type, order: d.order ?? "", note: d.note ?? "" }); }}
-                    className="text-gray-300 hover:text-[#065A82] hover:bg-gray-100 text-sm px-2 py-1 rounded flex-shrink-0 leading-none"
-                    title="Detail / Upravit">
-                    ···
+                    className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:border-[#065A82] hover:text-[#065A82] hover:bg-blue-50 flex-shrink-0 font-medium"
+                    title="Upravit záznam">
+                    Upravit
                   </button>
+                  {d.status === "wait" && cancelConfirmId !== d.id && (
+                    <button onClick={() => setCancelConfirmId(d.id)}
+                      className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-400 hover:border-red-300 hover:text-red-500 hover:bg-red-50 flex-shrink-0"
+                      title="Zrušit čekání">
+                      ✕
+                    </button>
+                  )}
+                  {d.status === "wait" && cancelConfirmId === d.id && (
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button onClick={() => cancelDriver(d.id)} className="bg-red-600 text-white text-xs px-2 py-1 rounded-lg font-semibold">Zrušit?</button>
+                      <button onClick={() => setCancelConfirmId(null)} className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-lg">Ne</button>
+                    </div>
+                  )}
                   {d.status === "wait" && (
                     <button onClick={() => { setRampModal(d); setSelectedRamp("1"); setSelectedTime(nowTime()); }}
                       className="bg-[#065A82] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#054a6b] flex-shrink-0">
@@ -520,18 +543,43 @@ export default function OperatorPage() {
             {/* History */}
             {tab === "history" && (() => {
               const historyFirms = [...new Set(history.map(d => d.firm))].sort();
-              const displayHistory = filteredHistory.filter(d => historyFirmFilter === "all" || d.firm === historyFirmFilter);
+              const historyDays = [...new Set(history.map(d => {
+                const date = parseDate(d.createdAt);
+                return date.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
+              }))];
+              const displayHistory = filteredHistory.filter(d => {
+                if (historyFirmFilter !== "all" && d.firm !== historyFirmFilter) return false;
+                if (historyDayFilter !== "all") {
+                  const dateStr = parseDate(d.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
+                  if (dateStr !== historyDayFilter) return false;
+                }
+                return true;
+              });
               return filteredHistory.length === 0
                 ? <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">Žádná historie</div>
                 : <div className="flex flex-col overflow-hidden">
-                    {historyFirms.length > 1 && (
-                      <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Firma:</span>
-                        <select value={historyFirmFilter} onChange={e => setHistoryFirmFilter(e.target.value)}
-                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
-                          <option value="all">Všechny</option>
-                          {historyFirms.map(f => <option key={f} value={f}>{f}</option>)}
-                        </select>
+                    {(historyFirms.length > 1 || historyDays.length > 1) && (
+                      <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3 flex-wrap">
+                        {historyDays.length > 1 && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-gray-500">Den:</span>
+                            <select value={historyDayFilter} onChange={e => setHistoryDayFilter(e.target.value)}
+                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                              <option value="all">Všechny dny</option>
+                              {historyDays.map(d => <option key={d} value={d}>{d}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {historyFirms.length > 1 && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-gray-500">Firma:</span>
+                            <select value={historyFirmFilter} onChange={e => setHistoryFirmFilter(e.target.value)}
+                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                              <option value="all">Všechny</option>
+                              {historyFirms.map(f => <option key={f} value={f}>{f}</option>)}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="divide-y divide-gray-100 overflow-y-auto">
@@ -541,12 +589,15 @@ export default function OperatorPage() {
                       const waitMins = d.rampAssignedAt
                         ? Math.round((parseDate(d.rampAssignedAt).getTime() - parseDate(d.createdAt).getTime()) / 60000) : null;
                       return (
-                        <div key={d.id} className="px-4 py-3 flex items-center gap-3 opacity-75">
+                        <div key={d.id} className={`px-4 py-3 flex items-center gap-3 ${d.note === "Zrušeno operátorem" ? "opacity-50" : "opacity-75"}`}>
                           <div className="w-9 h-9 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
                             {d.num}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-gray-700">{d.name}</div>
+                            <div className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                              {d.name}
+                              {d.note === "Zrušeno operátorem" && <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-500">Zrušeno</span>}
+                            </div>
                             <div className="text-xs text-gray-400 truncate">
                               {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
                               {d.ramp && ` · R${d.ramp}`}
@@ -570,15 +621,23 @@ export default function OperatorPage() {
                           {auditData.slice(0,30).map(a => {
                             const drv = drivers.find(d => d.id === a.driverId);
                             return (
-                              <div key={a.id} className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${a.action==="created"?"bg-blue-50 text-blue-600":a.action==="ramp_assigned"?"bg-green-50 text-green-600":a.action==="note_added"?"bg-amber-50 text-amber-600":"bg-gray-100 text-gray-500"}`}>
-                                  {ACTION_LABELS[a.action]??a.action}
-                                </span>
-                                {drv && <span>{drv.name} · {drv.spz}</span>}
-                                {a.ramp && <span>R{a.ramp}</span>}
-                                {a.note && a.action==="note_added" && <span className="italic truncate max-w-[120px]">"{a.note}"</span>}
-                                {a.operatorName && <span className="text-[#065A82] font-medium">{a.operatorName}</span>}
-                                <span className="ml-auto">{parseDate(a.createdAt).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"})}</span>
+                              <div key={a.id} className="flex flex-col gap-0.5 py-0.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
+                                    a.action==="created"?"bg-blue-50 text-blue-600"
+                                    :a.action==="ramp_assigned"?"bg-green-50 text-green-600"
+                                    :a.action==="note_added"?"bg-amber-50 text-amber-600"
+                                    :a.action==="edited"?"bg-purple-50 text-purple-600"
+                                    :a.action==="cancelled"?"bg-red-50 text-red-500"
+                                    :"bg-gray-100 text-gray-500"}`}>
+                                    {ACTION_LABELS[a.action]??a.action}
+                                  </span>
+                                  {drv && <span className="text-xs text-gray-600 font-medium">{drv.name} · {drv.spz}</span>}
+                                  {a.ramp && <span className="text-xs text-green-700">R{a.ramp}</span>}
+                                  {a.operatorName && <span className="text-xs text-[#065A82] font-medium ml-auto">{a.operatorName}</span>}
+                                  <span className={`text-xs text-gray-400 ${a.operatorName ? "" : "ml-auto"}`}>{fmtHistoryDate(a.createdAt)}</span>
+                                </div>
+                                {a.note && <div className="text-xs text-gray-500 pl-1 italic">{a.note}</div>}
                               </div>
                             );
                           })}
@@ -591,9 +650,10 @@ export default function OperatorPage() {
 
             {/* Stats */}
             {tab === "stats" && (
-              <div className="p-4 overflow-y-auto">
-                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                  <div className="flex gap-1">
+              <div className="p-4 overflow-y-auto space-y-4">
+                {/* Controls row */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex gap-1 flex-wrap">
                     {(["today","week","month","all"] as StatsPeriod[]).map(p => (
                       <button key={p} onClick={() => setStatsPeriod(p)}
                         className={`px-3 py-1 rounded-lg text-xs font-medium transition ${statsPeriod===p?"bg-[#065A82] text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
@@ -601,18 +661,50 @@ export default function OperatorPage() {
                       </button>
                     ))}
                   </div>
+                  <div className="flex gap-1 flex-wrap">
+                    {([["all","Vše"],["vyklada","Vykládka"],["naklada","Nakládka"],["obe","Vykl.+Nakl."]] as const).map(([v,l]) => (
+                      <button key={v} onClick={() => setStatsTypeFilter(v)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${statsTypeFilter===v?"bg-amber-500 text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
                   {stats && stats.rows.length > 0 && (
                     <button onClick={() => exportCsv(stats.rows)}
-                      className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700">
-                      ↓ CSV ({stats.rows.length})
+                      className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 whitespace-nowrap">
+                      ↓ Exportovat {stats.rows.length} záznamů jako CSV
                     </button>
                   )}
                 </div>
                 {!stats ? (
                   <p className="text-sm text-gray-400 text-center py-8">Načítám…</p>
-                ) : (
+                ) : (() => {
+                  // KPI computations
+                  const completedRows = stats.rows.filter(r => r.doneAt && r.rampAssignedAt);
+                  const avgRamp = completedRows.length
+                    ? Math.round(completedRows.reduce((s,r) => s + (parseDate(r.doneAt).getTime() - parseDate(r.rampAssignedAt!).getTime()), 0) / completedRows.length / 60000)
+                    : null;
+                  const waitRows = stats.rows.filter(r => r.rampAssignedAt);
+                  const avgWait = waitRows.length
+                    ? Math.round(waitRows.reduce((s,r) => s + (parseDate(r.rampAssignedAt!).getTime() - parseDate(r.createdAt).getTime()), 0) / waitRows.length / 60000)
+                    : null;
+                  const rampsUsed = new Set(stats.rows.filter(r => r.ramp).map(r => r.ramp)).size;
+                  return (
                   <div className="space-y-5">
-                    <p className="text-xs text-gray-500">Celkem dokončeno: <strong>{stats.totalDone}</strong></p>
+                    {/* KPI cards */}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {[
+                        { label: "Dokončeno", value: stats.totalDone, unit: "jízd", color: "text-[#065A82]" },
+                        { label: "Ø čas na rampě", value: avgRamp !== null ? fmtDuration(avgRamp) : "—", unit: "", color: "text-green-700" },
+                        { label: "Ø čekání", value: avgWait !== null ? fmtDuration(avgWait) : "—", unit: "", color: "text-amber-600", tooltip: "Od registrace po přidělení rampy" },
+                        { label: "Ramp využito", value: rampsUsed, unit: `/ ${rampRows.length}`, color: "text-gray-700" },
+                      ].map(k => (
+                        <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100" title={k.tooltip}>
+                          <div className={`text-lg font-bold ${k.color}`}>{k.value}<span className="text-xs font-normal text-gray-400 ml-1">{k.unit}</span></div>
+                          <div className="text-xs text-gray-500 mt-0.5">{k.label}</div>
+                        </div>
+                      ))}
+                    </div>
                     <div>
                       <div className="flex items-baseline gap-2 mb-2">
                         <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Využití ramp</h3>
@@ -622,49 +714,69 @@ export default function OperatorPage() {
                         const maxCount = Math.max(...stats.perRamp.map(r => r.count), 1);
                         return (
                           <div className="space-y-1.5">
-                            {stats.perRamp.map(r => (
-                              <div key={r.ramp} className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
-                                <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                                  <div className="h-5 rounded-full bg-[#065A82]/80 flex items-center px-2 transition-all"
-                                    style={{ width: `${Math.max((r.count / maxCount) * 100, 4)}%` }}>
-                                    {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
+                            {stats.perRamp.map(r => {
+                              const isAnomaly = r.avgMinutes !== null && r.avgMinutes > 480;
+                              return (
+                                <div key={r.ramp} className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
+                                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                                    <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#065A82]/80"}`}
+                                      style={{ width: `${Math.max((r.count / maxCount) * 100, 4)}%` }}>
+                                      {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
+                                    </div>
                                   </div>
+                                  <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}
+                                    title={isAnomaly ? "Neobvykle dlouhý čas — ověřte záznam" : undefined}>
+                                    {isAnomaly && "⚠ "}ø {fmtDuration(r.avgMinutes)}
+                                  </span>
                                 </div>
-                                <span className="text-xs text-gray-500 w-16 text-right flex-shrink-0">ø {fmtDuration(r.avgMinutes)}</span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         );
                       })()}
                     </div>
                     <div>
-                      <div className="flex items-baseline gap-2 mb-2">
-                        <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Firmy</h3>
-                        <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <div className="flex items-baseline gap-2">
+                          <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Firmy</h3>
+                          <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
+                        </div>
+                        <input value={statsFirmSearch} onChange={e => setStatsFirmSearch(e.target.value)}
+                          placeholder="Hledat firmu…"
+                          className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-[#065A82]"/>
                       </div>
                       {stats.perFirm.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
-                        const maxCount = Math.max(...stats.perFirm.map(f => f.count), 1);
+                        const filtered = stats.perFirm.filter(f => !statsFirmSearch || f.firm.toLowerCase().includes(statsFirmSearch.toLowerCase()));
+                        const maxCount = Math.max(...filtered.map(f => f.count), 1);
                         return (
                           <div className="space-y-1.5">
-                            {stats.perFirm.map(f => (
-                              <div key={f.firm} className="flex items-center gap-2">
-                                <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0" title={f.firm}>{f.firm}</span>
-                                <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                                  <div className="h-5 rounded-full bg-[#1D9E75]/80 flex items-center px-2 transition-all"
-                                    style={{ width: `${Math.max((f.count / maxCount) * 100, 4)}%` }}>
-                                    {f.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{f.count}×</span>}
+                            {filtered.map(f => {
+                              const isAnomaly = f.avgMinutes !== null && f.avgMinutes > 480;
+                              return (
+                                <div key={f.firm} className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0" title={f.firm}>{f.firm}</span>
+                                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                                    <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#1D9E75]/80"}`}
+                                      style={{ width: `${Math.max((f.count / maxCount) * 100, 4)}%` }}>
+                                      {f.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{f.count}×</span>}
+                                    </div>
                                   </div>
+                                  <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}
+                                    title={isAnomaly ? "Neobvykle dlouhý čas — ověřte záznam" : undefined}>
+                                    {isAnomaly && "⚠ "}ø {fmtDuration(f.avgMinutes)}
+                                  </span>
                                 </div>
-                                <span className="text-xs text-gray-500 w-16 text-right flex-shrink-0">ø {fmtDuration(f.avgMinutes)}</span>
-                              </div>
-                            ))}
+                              );
+                            })}
+                            {filtered.length === 0 && <p className="text-xs text-gray-400">Žádná shoda</p>}
                           </div>
                         );
                       })()}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -837,7 +949,7 @@ export default function OperatorPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Číslo rampy</label>
                 <div className="flex gap-1.5 flex-wrap">
-                  {rampRows.map(r => {
+                  {[...rampRows].sort((a, b) => Number(a.name) - Number(b.name)).map(r => {
                     const occ = occupiedRampNames.has(r.name) && driverOnRamp.get(r.name)?.id !== rampModal.id;
                     const rep = r.status === "repair";
                     return (
@@ -867,18 +979,26 @@ export default function OperatorPage() {
               </div>
             )}
 
-            <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm text-gray-700">
-              {buildRampSms(rampModal.lang as "cs"|"sk"|"pl"|"de", rampModal.name, selectedRamp, selectedTime)}
-            </div>
+            {!skipSms && (
+              <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm text-gray-700">
+                {buildRampSms(rampModal.lang as "cs"|"sk"|"pl"|"de", rampModal.name, selectedRamp, selectedTime)}
+              </div>
+            )}
+
+            <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
+              <input type="checkbox" checked={skipSms} onChange={e => setSkipSms(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-[#065A82]"/>
+              <span className="text-sm text-gray-600">Přidělit bez SMS</span>
+            </label>
 
             <div className="flex gap-3">
-              <button onClick={() => { setRampModal(null); setRampConflict(null); }}
+              <button onClick={() => { setRampModal(null); setRampConflict(null); setSkipSms(false); }}
                 className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-xl font-medium hover:bg-gray-50">
                 Zrušit
               </button>
               <button onClick={assignRamp} disabled={sending}
                 className={`flex-1 text-white py-2.5 rounded-xl font-medium disabled:opacity-60 ${rampConflict?"bg-orange-500 hover:bg-orange-600":"bg-[#1D9E75] hover:bg-[#178a64]"}`}>
-                {sending ? "Odesílám…" : rampConflict ? "Přesto odeslat ⚠" : "Odeslat SMS"}
+                {sending ? "Přiděluji…" : skipSms ? (rampConflict ? "Přidělit ⚠" : "Přidělit") : (rampConflict ? "Odeslat SMS ⚠" : "Odeslat SMS")}
               </button>
             </div>
           </div>

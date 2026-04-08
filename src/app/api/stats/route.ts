@@ -22,10 +22,15 @@ export async function GET(req: NextRequest) {
 
   const url = req.nextUrl;
   const fromParam = url.searchParams.get("from"); // ISO string or null
+  const typeParam = url.searchParams.get("type");  // vyklada | naklada | obe | null
 
   const db = await getDb();
 
+  const VALID_TYPES = new Set(["vyklada", "naklada", "obe"]);
   const conditions = [eq(drivers.status, "done")];
+  if (typeParam && VALID_TYPES.has(typeParam)) {
+    conditions.push(eq(drivers.type, typeParam));
+  }
   if (fromParam) {
     const fromDate = new Date(fromParam);
     if (!isNaN(fromDate.getTime())) {

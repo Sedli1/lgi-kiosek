@@ -40,7 +40,7 @@ export const ramps = sqliteTable("Ramp", {
 export const auditLogs = sqliteTable("AuditLog", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   driverId: integer("driverId").references(() => drivers.id),
-  action: text("action").notNull(), // ramp_assigned | done | created | note_added
+  action: text("action").notNull(), // ramp_assigned | done | created | note_added | edited | cancelled
   ramp: text("ramp"),
   note: text("note"),
   operatorName: text("operatorName"),
