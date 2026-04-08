@@ -712,130 +712,169 @@ export default function OperatorPage() {
                 {!stats ? (
                   <p className="text-sm text-gray-400 text-center py-8">Načítám…</p>
                 ) : (() => {
-                  // KPI computations
-                  const completedRows = stats.rows.filter(r => r.doneAt && r.rampAssignedAt);
+                  // KPI výpočty
+                  const nonCancelledRows = stats.rows.filter(r => r.status !== "cancelled");
+                  const completedRows = nonCancelledRows.filter(r => r.doneAt && r.rampAssignedAt);
                   const avgRamp = completedRows.length
                     ? Math.round(completedRows.reduce((s,r) => s + (parseDate(r.doneAt).getTime() - parseDate(r.rampAssignedAt!).getTime()), 0) / completedRows.length / 60000)
                     : null;
-                  const waitRows = stats.rows.filter(r => r.rampAssignedAt);
+                  const waitRows = nonCancelledRows.filter(r => r.rampAssignedAt);
                   const avgWait = waitRows.length
                     ? Math.round(waitRows.reduce((s,r) => s + (parseDate(r.rampAssignedAt!).getTime() - parseDate(r.createdAt).getTime()), 0) / waitRows.length / 60000)
                     : null;
-                  const rampsUsed = new Set(stats.rows.filter(r => r.ramp).map(r => r.ramp)).size;
+                  const rampsUsed = new Set(nonCancelledRows.filter(r => r.ramp).map(r => r.ramp)).size;
+                  const totalRamps = rampRows.length;
+
+                  // Barva čekání
+                  const waitColor = avgWait === null ? "text-gray-400" : avgWait <= 10 ? "text-green-600" : avgWait <= 30 ? "text-amber-600" : "text-red-600";
+                  const waitArrow = avgWait === null ? null : avgWait <= 10 ? <span className="text-green-500 text-xs ml-1" title="Čekání je v normě">↓</span> : avgWait <= 30 ? <span className="text-amber-500 text-xs ml-1" title="Čekání je vyšší">→</span> : <span className="text-red-500 text-xs ml-1 animate-pulse" title="Čekání je nadměrné">↑</span>;
+
+                  // Peak hours
+                  const hourMap = new Map<number, number>();
+                  for (const r of stats.rows) {
+                    const h = parseDate(r.createdAt).getHours();
+                    hourMap.set(h, (hourMap.get(h) ?? 0) + 1);
+                  }
+                  const peakHours = [...hourMap.entries()].sort((a,b) => a[0]-b[0]);
+                  const maxPeak = Math.max(...peakHours.map(([,c]) => c), 1);
+
+                  // Barva dle minut na rampě
+                  const rampTimeColor = (mins: number | null) =>
+                    mins === null ? "bg-gray-300" : mins < 60 ? "bg-green-500" : mins < 240 ? "bg-amber-400" : "bg-red-500";
+                  const rampTimeBadgeColor = (mins: number | null) =>
+                    mins === null ? "bg-gray-100 text-gray-400" : mins < 60 ? "bg-green-100 text-green-700" : mins < 240 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600";
+
                   return (
                   <div className="space-y-5">
-                    {/* KPI cards */}
+                    {/* KPI karty */}
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      {[
-                        { label: "Dokončeno", value: stats.totalDone, unit: "jízd", color: "text-[#065A82]" },
-                        { label: "Ø čas na rampě", value: avgRamp !== null ? fmtDuration(avgRamp) : "—", unit: "", color: "text-green-700" },
-                        { label: "Ø čekání", value: avgWait !== null ? fmtDuration(avgWait) : "—", unit: "", color: "text-amber-600", tooltip: "Od registrace po přidělení rampy" },
-                        { label: "Ramp využito", value: rampsUsed, unit: `/ ${rampRows.length}`, color: "text-gray-700" },
-                      ].map(k => (
-                        <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100" title={k.tooltip}>
-                          <div className={`text-lg font-bold ${k.color}`}>{k.value}<span className="text-xs font-normal text-gray-400 ml-1">{k.unit}</span></div>
-                          <div className="text-xs text-gray-500 mt-0.5">{k.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div>
-                      <div className="flex items-baseline gap-2 mb-2">
-                        <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Využití ramp</h3>
-                        <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
+                      <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                        <div className="text-lg font-bold text-[#065A82]">{stats.totalDone}<span className="text-xs font-normal text-gray-400 ml-1">jízd</span></div>
+                        <div className="text-xs text-gray-500 mt-0.5">Dokončeno</div>
                       </div>
+                      <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                        <div className="text-lg font-bold text-green-700">{avgRamp !== null ? fmtDuration(avgRamp) : "—"}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Ø čas na rampě</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100" title="Od registrace po přidělení rampy">
+                        <div className={`text-lg font-bold flex items-center justify-center ${waitColor}`}>
+                          {avgWait !== null ? fmtDuration(avgWait) : "—"}{waitArrow}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">Ø čekání</div>
+                      </div>
+                      <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="text-lg font-bold text-gray-700">{rampsUsed}<span className="text-xs font-normal text-gray-400">/{totalRamps}</span></span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
+                          <div className="bg-[#065A82] h-1.5 rounded-full transition-all" style={{ width: totalRamps > 0 ? `${Math.round((rampsUsed/totalRamps)*100)}%` : "0%" }}/>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">Ramp využito</div>
+                      </div>
+                    </div>
+
+                    {/* Využití ramp */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Využití ramp</h3>
                       {stats.perRamp.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
                         const activeRamps = stats.perRamp.filter(r => r.count > 0);
                         const inactiveRamps = stats.perRamp.filter(r => r.count === 0);
                         const maxCount = Math.max(...activeRamps.map(r => r.count), 1);
-                        const renderRamp = (r: typeof stats.perRamp[0]) => {
-                          const isAnomaly = r.avgMinutes !== null && r.avgMinutes > 480;
-                          const tooltip = `R${r.ramp}: ${r.count} návštěv${r.avgMinutes !== null ? `, ø ${fmtDuration(r.avgMinutes)} na rampě${isAnomaly ? " — nadprůměrné!" : ""}` : ""}`;
-                          return (
-                            <div key={r.ramp} className="flex items-center gap-2" title={tooltip}>
-                              <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
-                              <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                                <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#065A82]/80"}`}
-                                  style={{ width: `${Math.max((r.count / maxCount) * 100, 4)}%` }}>
-                                  {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
-                                </div>
-                              </div>
-                              <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}>
-                                {isAnomaly && "⚠ "}ø {fmtDuration(r.avgMinutes)}
-                              </span>
-                            </div>
-                          );
-                        };
                         return (
                           <div className="space-y-1.5">
-                            {activeRamps.map(renderRamp)}
+                            {activeRamps.map(r => {
+                              const barColor = rampTimeColor(r.avgMinutes);
+                              const badgeColor = rampTimeBadgeColor(r.avgMinutes);
+                              const isAnomaly = r.avgMinutes !== null && r.avgMinutes > 480;
+                              const tooltip = `R${r.ramp}: ${r.count} návštěv, ø ${fmtDuration(r.avgMinutes)} na rampě${isAnomaly ? " — nadprůměrné!" : ""}`;
+                              return (
+                                <div key={r.ramp} className="flex items-center gap-2" title={tooltip}>
+                                  <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
+                                  <div className="flex-1 bg-gray-100 rounded h-5 overflow-hidden">
+                                    <div className={`h-5 flex items-center px-2 transition-all ${barColor}`}
+                                      style={{ width: `${Math.max((r.count / maxCount) * 100, 6)}%` }}>
+                                      <span className="text-[10px] text-white font-bold whitespace-nowrap">{r.count}×</span>
+                                    </div>
+                                  </div>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${badgeColor}`}>
+                                    {isAnomaly && "⚠ "}ø {fmtDuration(r.avgMinutes)}
+                                  </span>
+                                </div>
+                              );
+                            })}
                             {inactiveRamps.length > 0 && (
-                              <div className="pt-1 border-t border-gray-100">
-                                <span className="text-[10px] text-gray-400">Bez aktivity: {inactiveRamps.map(r => `R${r.ramp}`).join(", ")}</span>
+                              <div className="pt-2 flex flex-wrap gap-1.5">
+                                {inactiveRamps.map(r => (
+                                  <span key={r.ramp} className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-400 border border-gray-200">R{r.ramp} —</span>
+                                ))}
                               </div>
                             )}
+                            <div className="flex gap-3 mt-1 text-[10px] text-gray-400">
+                              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"/>{"< 1h"}</span>
+                              <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1"/>1–4h</span>
+                              <span><span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-1"/>{">4h"}</span>
+                            </div>
                           </div>
                         );
                       })()}
                     </div>
+
+                    {/* Firmy */}
                     <div>
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <div className="flex items-baseline gap-2">
-                          <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Firmy</h3>
-                          <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
-                        </div>
+                        <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Firmy</h3>
+                        <span className="text-[10px] text-gray-400 ml-1">kliknutím zobrazíš historii</span>
                         <input value={statsFirmSearch} onChange={e => setStatsFirmSearch(e.target.value)}
-                          placeholder="Hledat firmu…"
-                          className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-[#065A82]"/>
+                          placeholder="Hledat…"
+                          className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1 w-28 focus:outline-none focus:ring-1 focus:ring-[#065A82]"/>
                       </div>
                       {stats.perFirm.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
-                        const filtered = stats.perFirm.filter(f => f.count > 0 && (!statsFirmSearch || f.firm.toLowerCase().includes(statsFirmSearch.toLowerCase())));
+                        const filtered = stats.perFirm
+                          .filter(f => f.count > 0 && (!statsFirmSearch || f.firm.toLowerCase().includes(statsFirmSearch.toLowerCase())))
+                          .sort((a, b) => b.count - a.count || (b.avgMinutes ?? 0) - (a.avgMinutes ?? 0));
                         if (filtered.length === 0) return <p className="text-xs text-gray-400">Žádná shoda</p>;
                         const maxCount = Math.max(...filtered.map(f => f.count), 1);
-                        const allSameCount = filtered.every(f => f.count === maxCount);
-                        if (allSameCount) {
-                          // Tabulka seřazená dle ø času na rampě
-                          const sorted = [...filtered].sort((a, b) => (b.avgMinutes ?? 0) - (a.avgMinutes ?? 0));
-                          return (
-                            <div className="space-y-0.5">
-                              {sorted.map(f => {
-                                const isAnomaly = f.avgMinutes !== null && f.avgMinutes > 480;
-                                return (
-                                  <div key={f.firm} className="flex items-center gap-2 py-1 border-b border-gray-50">
-                                    <span className="text-xs text-gray-700 flex-1 truncate" title={f.firm}>{f.firm}</span>
-                                    <span className="text-xs text-gray-400 flex-shrink-0">{f.count}×</span>
-                                    <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}>
-                                      {isAnomaly && "⚠ "}ø {fmtDuration(f.avgMinutes)}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        }
                         return (
-                          <div className="space-y-1.5">
+                          <div className="space-y-0.5">
                             {filtered.map(f => {
+                              const badgeColor = rampTimeBadgeColor(f.avgMinutes);
                               const isAnomaly = f.avgMinutes !== null && f.avgMinutes > 480;
-                              const tooltip = `${f.firm}: ${f.count} návštěv${f.avgMinutes !== null ? `, ø ${fmtDuration(f.avgMinutes)} na rampě${isAnomaly ? " — nadprůměrné!" : ""}` : ""}`;
                               return (
-                                <div key={f.firm} className="flex items-center gap-2" title={tooltip}>
-                                  <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0" title={f.firm}>{f.firm}</span>
-                                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                                    <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#1D9E75]/80"}`}
-                                      style={{ width: `${Math.max((f.count / maxCount) * 100, 4)}%` }}>
-                                      {f.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{f.count}×</span>}
-                                    </div>
+                                <button key={f.firm}
+                                  onClick={() => { setHistoryFirmFilter(f.firm); setTab("history"); }}
+                                  className="w-full flex items-center gap-2 py-1.5 px-1 rounded hover:bg-blue-50 group text-left"
+                                  title={`Zobrazit historii firmy ${f.firm}`}>
+                                  <span className="text-xs text-gray-700 w-24 truncate flex-shrink-0 group-hover:text-[#065A82]" title={f.firm}>{f.firm}</span>
+                                  <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden">
+                                    <div className="h-4 bg-[#1D9E75]/70 rounded transition-all" style={{ width: `${Math.max((f.count / maxCount) * 100, 4)}%` }}/>
                                   </div>
-                                  <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}>
+                                  <span className="text-xs text-gray-500 w-5 text-right flex-shrink-0">{f.count}×</span>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${badgeColor}`}>
                                     {isAnomaly && "⚠ "}ø {fmtDuration(f.avgMinutes)}
                                   </span>
-                                </div>
+                                </button>
                               );
                             })}
                           </div>
                         );
                       })()}
                     </div>
+
+                    {/* Peak hours */}
+                    {peakHours.length > 0 && (
+                      <div>
+                        <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Příjezdy dle hodiny</h3>
+                        <div className="flex items-end gap-0.5 h-14">
+                          {peakHours.map(([h, c]) => (
+                            <div key={h} className="flex flex-col items-center flex-1 gap-0.5" title={`${String(h).padStart(2,"0")}:00 — ${c} příjezdů`}>
+                              <div className="w-full bg-[#065A82]/70 rounded-t transition-all" style={{ height: `${Math.round((c/maxPeak)*48)+4}px` }}/>
+                              <span className="text-[9px] text-gray-400 leading-none">{h}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">Hodina příjezdu (počet jízd)</p>
+                      </div>
+                    )}
                   </div>
                   );
                 })()}
