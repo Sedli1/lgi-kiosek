@@ -198,6 +198,9 @@ export default function OperatorPage() {
   const [cancelConfirmId, setCancelConfirmId] = useState<number | null>(null);
   const [statsFirmSearch, setStatsFirmSearch] = useState("");
   const [statsTypeFilter, setStatsTypeFilter] = useState("all");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
+  const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
+  const [historyDetailModal, setHistoryDetailModal] = useState<Driver | null>(null);
 
   // Request notification permission
   useEffect(() => {
@@ -543,142 +546,162 @@ export default function OperatorPage() {
             {/* History */}
             {tab === "history" && (() => {
               const historyFirms = [...new Set(history.map(d => d.firm))].sort();
-              const historyDays = [...new Set(history.map(d => {
-                const date = parseDate(d.createdAt);
-                return date.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
-              }))];
+              const historyDays = [...new Set(history.map(d =>
+                parseDate(d.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" })
+              ))];
               const displayHistory = filteredHistory.filter(d => {
                 if (historyFirmFilter !== "all" && d.firm !== historyFirmFilter) return false;
-                if (historyDayFilter === "today") {
-                  return parseDate(d.createdAt).toDateString() === new Date().toDateString();
-                } else if (historyDayFilter === "week") {
-                  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7); return parseDate(d.createdAt) >= weekAgo;
-                } else if (historyDayFilter !== "all") {
-                  const dateStr = parseDate(d.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
-                  if (dateStr !== historyDayFilter) return false;
+                if (historyTypeFilter !== "all" && d.type !== historyTypeFilter) return false;
+                if (historyStatusFilter === "done" && d.note === "Zrušeno operátorem") return false;
+                if (historyStatusFilter === "cancelled" && d.note !== "Zrušeno operátorem") return false;
+                if (historyDayFilter === "today") return parseDate(d.createdAt).toDateString() === new Date().toDateString();
+                if (historyDayFilter === "week") { const w = new Date(); w.setDate(w.getDate()-7); return parseDate(d.createdAt) >= w; }
+                if (historyDayFilter !== "all") {
+                  const s = parseDate(d.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
+                  if (s !== historyDayFilter) return false;
                 }
                 return true;
               });
               const histSummary = (() => {
-                const withRamp = displayHistory.filter(d => d.rampAssignedAt && d.doneAt && d.note !== "Zrušeno operátorem");
+                const ok = displayHistory.filter(d => d.rampAssignedAt && d.doneAt && d.note !== "Zrušeno operátorem");
                 const withWait = displayHistory.filter(d => d.rampAssignedAt && d.note !== "Zrušeno operátorem");
-                const avgRamp = withRamp.length ? Math.round(withRamp.reduce((s,d) => s + (parseDate(d.doneAt!).getTime() - parseDate(d.rampAssignedAt!).getTime()), 0) / withRamp.length / 60000) : null;
+                const avgRamp = ok.length ? Math.round(ok.reduce((s,d) => s + (parseDate(d.doneAt!).getTime() - parseDate(d.rampAssignedAt!).getTime()), 0) / ok.length / 60000) : null;
                 const avgWait = withWait.length ? Math.round(withWait.reduce((s,d) => s + (parseDate(d.rampAssignedAt!).getTime() - parseDate(d.createdAt).getTime()), 0) / withWait.length / 60000) : null;
                 return { count: displayHistory.length, avgRamp, avgWait };
               })();
-              return filteredHistory.length === 0
-                ? <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">Žádná historie</div>
-                : <div className="flex flex-col overflow-hidden">
-                    {(historyFirms.length > 1 || historyDays.length > 1) && (
-                      <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-                        {historyDays.length > 1 && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-gray-500">Den:</span>
-                            <select value={historyDayFilter} onChange={e => setHistoryDayFilter(e.target.value)}
-                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
-                              <option value="all">Všechny dny</option>
-                              <option value="today">Dnes</option>
-                              <option value="week">Posledních 7 dní</option>
-                              {historyDays.map(d => <option key={d} value={d}>{d}</option>)}
-                            </select>
-                          </div>
-                        )}
-                        {historyFirms.length > 1 && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-gray-500">Firma:</span>
-                            <select value={historyFirmFilter} onChange={e => setHistoryFirmFilter(e.target.value)}
-                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
-                              <option value="all">Všechny</option>
-                              {historyFirms.map(f => <option key={f} value={f}>{f}</option>)}
-                            </select>
-                          </div>
-                        )}
-                        {displayHistory.length > 0 && (
-                          <button onClick={() => exportCsv(displayHistory as unknown as DriverRow[])}
-                            className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 whitespace-nowrap">
-                            ↓ CSV ({displayHistory.length})
-                          </button>
-                        )}
-                      </div>
+
+              // Skupiny dle dne
+              const now2 = new Date();
+              const yesterday2 = new Date(now2); yesterday2.setDate(now2.getDate()-1);
+              const dayGroups = new Map<string, Driver[]>();
+              for (const d of [...displayHistory].sort((a,b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime())) {
+                const dt = parseDate(d.createdAt);
+                let label: string;
+                if (dt.toDateString() === now2.toDateString()) label = `Dnes (${dt.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })})`;
+                else if (dt.toDateString() === yesterday2.toDateString()) label = `Včera (${dt.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })})`;
+                else label = dt.toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "numeric" });
+                const arr = dayGroups.get(label) ?? []; arr.push(d); dayGroups.set(label, arr);
+              }
+
+              if (history.length === 0) return <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">Žádná historie</div>;
+
+              return (
+                <div className="flex flex-col overflow-hidden">
+                  {/* Filtry */}
+                  <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap bg-white">
+                    <select value={historyDayFilter} onChange={e => setHistoryDayFilter(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                      <option value="all">Všechny dny</option>
+                      <option value="today">Dnes</option>
+                      <option value="week">7 dní</option>
+                      {historyDays.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    {historyFirms.length > 1 && (
+                      <select value={historyFirmFilter} onChange={e => setHistoryFirmFilter(e.target.value)}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                        <option value="all">Všechny firmy</option>
+                        {historyFirms.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
                     )}
+                    <select value={historyTypeFilter} onChange={e => setHistoryTypeFilter(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                      <option value="all">Vše</option>
+                      <option value="vyklada">Vykládka</option>
+                      <option value="naklada">Nakládka</option>
+                      <option value="obe">Vykl.+Nakl.</option>
+                    </select>
+                    <select value={historyStatusFilter} onChange={e => setHistoryStatusFilter(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
+                      <option value="all">Všechny stavy</option>
+                      <option value="done">Hotovo</option>
+                      <option value="cancelled">Zrušeno</option>
+                    </select>
                     {displayHistory.length > 0 && (
-                      <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-100 flex gap-3 text-xs text-gray-500">
-                        <span className="font-medium text-gray-700">{histSummary.count} jízd</span>
-                        {histSummary.avgWait !== null && <span>ø čekání <span className="text-amber-600 font-medium">{fmtDuration(histSummary.avgWait)}</span></span>}
-                        {histSummary.avgRamp !== null && <span>ø rampa <span className="text-[#065A82] font-medium">{fmtDuration(histSummary.avgRamp)}</span></span>}
-                      </div>
-                    )}
-                    <div className="divide-y divide-gray-100 overflow-y-auto">
-                    {displayHistory.map(d => {
-                      const rampMins = d.rampAssignedAt && d.doneAt
-                        ? Math.round((parseDate(d.doneAt).getTime() - parseDate(d.rampAssignedAt).getTime()) / 60000) : null;
-                      const waitMins = d.rampAssignedAt
-                        ? Math.round((parseDate(d.rampAssignedAt).getTime() - parseDate(d.createdAt).getTime()) / 60000) : null;
-                      const isCancelled = d.note === "Zrušeno operátorem";
-                      const statusDot = isCancelled
-                        ? <span className="text-red-400 text-sm flex-shrink-0" title="Zrušeno operátorem">✕</span>
-                        : waitMins !== null && waitMins > 30
-                          ? <span className="text-orange-400 text-sm flex-shrink-0" title="Dokončeno — čekalo déle než 30 min">⚠</span>
-                          : <span className="text-green-500 text-sm flex-shrink-0" title="Dokončeno v pořádku">✓</span>;
-                      return (
-                        <div key={d.id} className={`px-4 py-3 flex items-center gap-3 ${isCancelled ? "opacity-50" : ""}`}>
-                          {statusDot}
-                          <div className="w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                            {d.num}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-                              {d.name}
-                              {isCancelled && <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-500">Zrušeno</span>}
-                            </div>
-                            <div className="text-xs text-gray-400 truncate">
-                              {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
-                              {d.ramp && ` · R${d.ramp}`}
-                            </div>
-                          </div>
-                          <div className="text-right text-xs flex-shrink-0 space-y-0.5">
-                            <div className="text-gray-400">{fmtHistoryDate(d.createdAt)}</div>
-                            <div className="flex gap-1.5 justify-end">
-                              {waitMins !== null && <span className="text-amber-600" title="Čas čekání">⏱ {fmtDuration(waitMins)}</span>}
-                              {rampMins !== null && <span className="text-[#065A82] font-medium" title="Čas na rampě">🔧 {fmtDuration(rampMins)}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {/* Audit inline at bottom */}
-                    {auditData.length > 0 && (
-                      <details className="px-4 py-2">
-                        <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Audit log ({auditData.length})</summary>
-                        <div className="mt-2 space-y-1">
-                          {auditData.slice(0,30).map(a => {
-                            const drv = drivers.find(d => d.id === a.driverId);
-                            return (
-                              <div key={a.id} className="flex flex-col gap-0.5 py-0.5">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
-                                    a.action==="created"?"bg-blue-50 text-blue-600"
-                                    :a.action==="ramp_assigned"?"bg-green-50 text-green-600"
-                                    :a.action==="note_added"?"bg-amber-50 text-amber-600"
-                                    :a.action==="edited"?"bg-purple-50 text-purple-600"
-                                    :a.action==="cancelled"?"bg-red-50 text-red-500"
-                                    :"bg-gray-100 text-gray-500"}`}>
-                                    {ACTION_LABELS[a.action]??a.action}
-                                  </span>
-                                  {drv && <span className="text-xs text-gray-600 font-medium">{drv.name} · {drv.spz}</span>}
-                                  {a.ramp && <span className="text-xs text-green-700">R{a.ramp}</span>}
-                                  {a.operatorName && <span className="text-xs text-[#065A82] font-medium ml-auto">{a.operatorName}</span>}
-                                  <span className={`text-xs text-gray-400 ${a.operatorName ? "" : "ml-auto"}`}>{fmtHistoryDate(a.createdAt)}</span>
-                                </div>
-                                {a.note && <div className="text-xs text-gray-500 pl-1 italic">{a.note}</div>}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </details>
+                      <button onClick={() => exportCsv(displayHistory as unknown as DriverRow[])}
+                        className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 whitespace-nowrap">
+                        ↓ CSV ({displayHistory.length})
+                      </button>
                     )}
                   </div>
-                  </div>;
+                  {/* Summary bar */}
+                  {displayHistory.length > 0 && (
+                    <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-100 flex gap-3 text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{histSummary.count} jízd</span>
+                      {histSummary.avgWait !== null && <span>ø čekání <span className="text-amber-600 font-medium">{fmtDuration(histSummary.avgWait)}</span></span>}
+                      {histSummary.avgRamp !== null && <span>ø rampa <span className="text-[#065A82] font-medium">{fmtDuration(histSummary.avgRamp)}</span></span>}
+                    </div>
+                  )}
+                  {/* Skupiny */}
+                  <div className="overflow-y-auto">
+                    {displayHistory.length === 0
+                      ? <div className="text-center text-gray-400 text-sm py-10">Žádné výsledky</div>
+                      : [...dayGroups.entries()].map(([dayLabel, rows]) => (
+                        <div key={dayLabel}>
+                          <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                            <span className="text-xs font-semibold text-gray-500">{dayLabel}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 font-medium">{rows.length}</span>
+                          </div>
+                          <div className="divide-y divide-gray-50">
+                            {rows.map(d => {
+                              const rampMins = d.rampAssignedAt && d.doneAt
+                                ? Math.round((parseDate(d.doneAt).getTime() - parseDate(d.rampAssignedAt).getTime()) / 60000) : null;
+                              const waitMins = d.rampAssignedAt
+                                ? Math.round((parseDate(d.rampAssignedAt).getTime() - parseDate(d.createdAt).getTime()) / 60000) : null;
+                              const isCancelled = d.note === "Zrušeno operátorem";
+                              const isOverdue = !isCancelled && rampMins !== null && rampMins > 120;
+                              const statusIcon = isCancelled
+                                ? <div className="w-5 h-5 rounded-full bg-red-100 text-red-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">✕</div>
+                                : isOverdue
+                                  ? <div className="w-5 h-5 rounded-full bg-orange-100 text-orange-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">⚠</div>
+                                  : <div className="w-5 h-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">✓</div>;
+                              return (
+                                <button key={d.id} onClick={() => setHistoryDetailModal(d)}
+                                  className="w-full text-left px-3 py-2.5 hover:bg-blue-50/40 transition flex items-start gap-2">
+                                  {statusIcon}
+                                  <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center font-bold text-[10px] flex-shrink-0 mt-0.5">
+                                    {d.num}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-sm font-semibold text-gray-800 leading-tight">{d.name}</span>
+                                      {isCancelled
+                                        ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">Zrušeno</span>
+                                        : isOverdue
+                                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 font-medium">Překročil čas</span>
+                                          : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Hotovo</span>
+                                      }
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 mt-0.5 truncate">
+                                      {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}{d.ramp && ` · R${d.ramp}`}
+                                    </div>
+                                    {!isCancelled && (waitMins !== null || rampMins !== null) && (
+                                      <div className="flex gap-1.5 mt-1 flex-wrap">
+                                        {waitMins !== null && (
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${waitMins > 30 ? "bg-red-50 text-red-600" : waitMins > 15 ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
+                                            ⏱ {fmtDuration(waitMins)}
+                                          </span>
+                                        )}
+                                        {rampMins !== null && (
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${rampMins > 240 ? "bg-red-50 text-red-600" : rampMins > 60 ? "bg-amber-50 text-amber-700" : "bg-green-50 text-green-700"}`}>
+                                            🏭 {fmtDuration(rampMins)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-gray-400 flex-shrink-0 mt-0.5">
+                                    {parseDate(d.createdAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              );
             })()}
 
             {/* Stats */}
@@ -1018,6 +1041,91 @@ export default function OperatorPage() {
           </div>
         </div>
       )}
+
+      {/* History detail modal */}
+      {historyDetailModal && (() => {
+        const d = historyDetailModal;
+        const driverAudit = auditData.filter(a => a.driverId === d.id).sort((a,b) => parseDate(a.createdAt).getTime() - parseDate(b.createdAt).getTime());
+        const rampMins = d.rampAssignedAt && d.doneAt ? Math.round((parseDate(d.doneAt).getTime() - parseDate(d.rampAssignedAt).getTime()) / 60000) : null;
+        const waitMins = d.rampAssignedAt ? Math.round((parseDate(d.rampAssignedAt).getTime() - parseDate(d.createdAt).getTime()) / 60000) : null;
+        const isCancelled = d.note === "Zrušeno operátorem";
+        const isOverdue = !isCancelled && rampMins !== null && rampMins > 120;
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setHistoryDetailModal(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-gray-900">#{d.num} {d.name}</h3>
+                    {isCancelled
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">Zrušeno</span>
+                      : isOverdue
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 font-medium">Překročil čas</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Hotovo</span>
+                    }
+                  </div>
+                  <p className="text-sm text-gray-500 mt-0.5">{d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}</p>
+                  {d.note && !isCancelled && <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1.5">📝 {d.note}</p>}
+                </div>
+                <button onClick={() => setHistoryDetailModal(null)} className="text-gray-300 hover:text-gray-500 text-2xl leading-none ml-2">×</button>
+              </div>
+
+              {/* Timeline */}
+              <div className="space-y-0">
+                {[
+                  { dot: "bg-blue-100 text-blue-600", label: "Registrace", time: d.createdAt, sub: null },
+                  d.rampAssignedAt ? { dot: "bg-amber-100 text-amber-600", label: `Rampa R${d.ramp} přidělena${d.rampTime ? ` · ${d.rampTime}` : ""}`, time: d.rampAssignedAt, sub: waitMins !== null ? `⏱ čekání: ${fmtDuration(waitMins)}` : null } : null,
+                  d.doneAt ? { dot: isCancelled ? "bg-red-100 text-red-500" : "bg-green-100 text-green-600", label: isCancelled ? "Zrušeno operátorem" : "Dokončeno", time: d.doneAt, sub: rampMins !== null && !isCancelled ? `🏭 čas na rampě: ${fmtDuration(rampMins)}` : null } : null,
+                ].filter(Boolean).map((step, i) => (
+                  <div key={i} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${step!.dot}`}>
+                        {i === 0 ? "1" : i === 1 ? "2" : "3"}
+                      </div>
+                      {i < 2 && <div className="w-px flex-1 bg-gray-200 my-1" style={{minHeight:"12px"}}/>}
+                    </div>
+                    <div className="pb-3">
+                      <div className="text-sm font-medium text-gray-800">{step!.label}</div>
+                      <div className="text-xs text-gray-400">{fmtHistoryDate(step!.time)}</div>
+                      {step!.sub && <div className="text-xs text-gray-600 mt-0.5">{step!.sub}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Audit log */}
+              {driverAudit.length > 0 && (
+                <div className="mt-2 pt-3 border-t border-gray-100">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Audit</p>
+                  <div className="space-y-1.5">
+                    {driverAudit.map(a => (
+                      <div key={a.id} className="flex items-start gap-2">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 mt-0.5 ${
+                          a.action==="created"?"bg-blue-50 text-blue-600"
+                          :a.action==="ramp_assigned"?"bg-green-50 text-green-600"
+                          :a.action==="edited"?"bg-purple-50 text-purple-600"
+                          :a.action==="cancelled"?"bg-red-50 text-red-500"
+                          :"bg-gray-100 text-gray-500"}`}>
+                          {ACTION_LABELS[a.action]??a.action}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          {a.note && <div className="text-[10px] text-gray-500 italic leading-tight">{a.note}</div>}
+                          <div className="text-[10px] text-gray-400">{fmtHistoryDate(a.createdAt)}{a.operatorName && ` · ${a.operatorName}`}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={() => setHistoryDetailModal(null)}
+                className="w-full mt-5 border border-gray-200 text-gray-600 py-2.5 rounded-xl font-medium hover:bg-gray-50 text-sm">
+                Zavřít
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Reset confirmation dialog */}
       {showResetDialog && (
