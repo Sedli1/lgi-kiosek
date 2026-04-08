@@ -549,12 +549,23 @@ export default function OperatorPage() {
               }))];
               const displayHistory = filteredHistory.filter(d => {
                 if (historyFirmFilter !== "all" && d.firm !== historyFirmFilter) return false;
-                if (historyDayFilter !== "all") {
+                if (historyDayFilter === "today") {
+                  return parseDate(d.createdAt).toDateString() === new Date().toDateString();
+                } else if (historyDayFilter === "week") {
+                  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7); return parseDate(d.createdAt) >= weekAgo;
+                } else if (historyDayFilter !== "all") {
                   const dateStr = parseDate(d.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
                   if (dateStr !== historyDayFilter) return false;
                 }
                 return true;
               });
+              const histSummary = (() => {
+                const withRamp = displayHistory.filter(d => d.rampAssignedAt && d.doneAt && d.note !== "Zrušeno operátorem");
+                const withWait = displayHistory.filter(d => d.rampAssignedAt && d.note !== "Zrušeno operátorem");
+                const avgRamp = withRamp.length ? Math.round(withRamp.reduce((s,d) => s + (parseDate(d.doneAt!).getTime() - parseDate(d.rampAssignedAt!).getTime()), 0) / withRamp.length / 60000) : null;
+                const avgWait = withWait.length ? Math.round(withWait.reduce((s,d) => s + (parseDate(d.rampAssignedAt!).getTime() - parseDate(d.createdAt).getTime()), 0) / withWait.length / 60000) : null;
+                return { count: displayHistory.length, avgRamp, avgWait };
+              })();
               return filteredHistory.length === 0
                 ? <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-12">Žádná historie</div>
                 : <div className="flex flex-col overflow-hidden">
@@ -566,6 +577,8 @@ export default function OperatorPage() {
                             <select value={historyDayFilter} onChange={e => setHistoryDayFilter(e.target.value)}
                               className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#065A82] bg-white">
                               <option value="all">Všechny dny</option>
+                              <option value="today">Dnes</option>
+                              <option value="week">Posledních 7 dní</option>
                               {historyDays.map(d => <option key={d} value={d}>{d}</option>)}
                             </select>
                           </div>
@@ -580,6 +593,19 @@ export default function OperatorPage() {
                             </select>
                           </div>
                         )}
+                        {displayHistory.length > 0 && (
+                          <button onClick={() => exportCsv(displayHistory as unknown as DriverRow[])}
+                            className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 whitespace-nowrap">
+                            ↓ CSV ({displayHistory.length})
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {displayHistory.length > 0 && (
+                      <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-100 flex gap-3 text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">{histSummary.count} jízd</span>
+                        {histSummary.avgWait !== null && <span>ø čekání <span className="text-amber-600 font-medium">{fmtDuration(histSummary.avgWait)}</span></span>}
+                        {histSummary.avgRamp !== null && <span>ø rampa <span className="text-[#065A82] font-medium">{fmtDuration(histSummary.avgRamp)}</span></span>}
                       </div>
                     )}
                     <div className="divide-y divide-gray-100 overflow-y-auto">
@@ -588,15 +614,22 @@ export default function OperatorPage() {
                         ? Math.round((parseDate(d.doneAt).getTime() - parseDate(d.rampAssignedAt).getTime()) / 60000) : null;
                       const waitMins = d.rampAssignedAt
                         ? Math.round((parseDate(d.rampAssignedAt).getTime() - parseDate(d.createdAt).getTime()) / 60000) : null;
+                      const isCancelled = d.note === "Zrušeno operátorem";
+                      const statusDot = isCancelled
+                        ? <span className="text-red-400 text-sm flex-shrink-0" title="Zrušeno operátorem">✕</span>
+                        : waitMins !== null && waitMins > 30
+                          ? <span className="text-orange-400 text-sm flex-shrink-0" title="Dokončeno — čekalo déle než 30 min">⚠</span>
+                          : <span className="text-green-500 text-sm flex-shrink-0" title="Dokončeno v pořádku">✓</span>;
                       return (
-                        <div key={d.id} className={`px-4 py-3 flex items-center gap-3 ${d.note === "Zrušeno operátorem" ? "opacity-50" : "opacity-75"}`}>
-                          <div className="w-9 h-9 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                        <div key={d.id} className={`px-4 py-3 flex items-center gap-3 ${isCancelled ? "opacity-50" : ""}`}>
+                          {statusDot}
+                          <div className="w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-xs flex-shrink-0">
                             {d.num}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
                               {d.name}
-                              {d.note === "Zrušeno operátorem" && <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-500">Zrušeno</span>}
+                              {isCancelled && <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-500">Zrušeno</span>}
                             </div>
                             <div className="text-xs text-gray-400 truncate">
                               {d.spz} · {d.firm} · {TYPE_LABELS[d.type]??d.type}
@@ -711,27 +744,35 @@ export default function OperatorPage() {
                         <span className="text-[10px] text-gray-400">počet návštěv · ø čas na rampě</span>
                       </div>
                       {stats.perRamp.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
-                        const maxCount = Math.max(...stats.perRamp.map(r => r.count), 1);
+                        const activeRamps = stats.perRamp.filter(r => r.count > 0);
+                        const inactiveRamps = stats.perRamp.filter(r => r.count === 0);
+                        const maxCount = Math.max(...activeRamps.map(r => r.count), 1);
+                        const renderRamp = (r: typeof stats.perRamp[0]) => {
+                          const isAnomaly = r.avgMinutes !== null && r.avgMinutes > 480;
+                          const tooltip = `R${r.ramp}: ${r.count} návštěv${r.avgMinutes !== null ? `, ø ${fmtDuration(r.avgMinutes)} na rampě${isAnomaly ? " — nadprůměrné!" : ""}` : ""}`;
+                          return (
+                            <div key={r.ramp} className="flex items-center gap-2" title={tooltip}>
+                              <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
+                              <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                                <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#065A82]/80"}`}
+                                  style={{ width: `${Math.max((r.count / maxCount) * 100, 4)}%` }}>
+                                  {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
+                                </div>
+                              </div>
+                              <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}>
+                                {isAnomaly && "⚠ "}ø {fmtDuration(r.avgMinutes)}
+                              </span>
+                            </div>
+                          );
+                        };
                         return (
                           <div className="space-y-1.5">
-                            {stats.perRamp.map(r => {
-                              const isAnomaly = r.avgMinutes !== null && r.avgMinutes > 480;
-                              return (
-                                <div key={r.ramp} className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-[#065A82] w-6 text-right flex-shrink-0">R{r.ramp}</span>
-                                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                                    <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#065A82]/80"}`}
-                                      style={{ width: `${Math.max((r.count / maxCount) * 100, 4)}%` }}>
-                                      {r.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{r.count}×</span>}
-                                    </div>
-                                  </div>
-                                  <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}
-                                    title={isAnomaly ? "Neobvykle dlouhý čas — ověřte záznam" : undefined}>
-                                    {isAnomaly && "⚠ "}ø {fmtDuration(r.avgMinutes)}
-                                  </span>
-                                </div>
-                              );
-                            })}
+                            {activeRamps.map(renderRamp)}
+                            {inactiveRamps.length > 0 && (
+                              <div className="pt-1 border-t border-gray-100">
+                                <span className="text-[10px] text-gray-400">Bez aktivity: {inactiveRamps.map(r => `R${r.ramp}`).join(", ")}</span>
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
@@ -747,14 +788,37 @@ export default function OperatorPage() {
                           className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-[#065A82]"/>
                       </div>
                       {stats.perFirm.length === 0 ? <p className="text-xs text-gray-400">Žádná data</p> : (() => {
-                        const filtered = stats.perFirm.filter(f => !statsFirmSearch || f.firm.toLowerCase().includes(statsFirmSearch.toLowerCase()));
+                        const filtered = stats.perFirm.filter(f => f.count > 0 && (!statsFirmSearch || f.firm.toLowerCase().includes(statsFirmSearch.toLowerCase())));
+                        if (filtered.length === 0) return <p className="text-xs text-gray-400">Žádná shoda</p>;
                         const maxCount = Math.max(...filtered.map(f => f.count), 1);
+                        const allSameCount = filtered.every(f => f.count === maxCount);
+                        if (allSameCount) {
+                          // Tabulka seřazená dle ø času na rampě
+                          const sorted = [...filtered].sort((a, b) => (b.avgMinutes ?? 0) - (a.avgMinutes ?? 0));
+                          return (
+                            <div className="space-y-0.5">
+                              {sorted.map(f => {
+                                const isAnomaly = f.avgMinutes !== null && f.avgMinutes > 480;
+                                return (
+                                  <div key={f.firm} className="flex items-center gap-2 py-1 border-b border-gray-50">
+                                    <span className="text-xs text-gray-700 flex-1 truncate" title={f.firm}>{f.firm}</span>
+                                    <span className="text-xs text-gray-400 flex-shrink-0">{f.count}×</span>
+                                    <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}>
+                                      {isAnomaly && "⚠ "}ø {fmtDuration(f.avgMinutes)}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        }
                         return (
                           <div className="space-y-1.5">
                             {filtered.map(f => {
                               const isAnomaly = f.avgMinutes !== null && f.avgMinutes > 480;
+                              const tooltip = `${f.firm}: ${f.count} návštěv${f.avgMinutes !== null ? `, ø ${fmtDuration(f.avgMinutes)} na rampě${isAnomaly ? " — nadprůměrné!" : ""}` : ""}`;
                               return (
-                                <div key={f.firm} className="flex items-center gap-2">
+                                <div key={f.firm} className="flex items-center gap-2" title={tooltip}>
                                   <span className="text-xs text-gray-700 w-28 truncate flex-shrink-0" title={f.firm}>{f.firm}</span>
                                   <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
                                     <div className={`h-5 rounded-full flex items-center px-2 transition-all ${isAnomaly ? "bg-orange-400/80" : "bg-[#1D9E75]/80"}`}
@@ -762,14 +826,12 @@ export default function OperatorPage() {
                                       {f.count > 0 && <span className="text-[10px] text-white font-semibold whitespace-nowrap">{f.count}×</span>}
                                     </div>
                                   </div>
-                                  <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}
-                                    title={isAnomaly ? "Neobvykle dlouhý čas — ověřte záznam" : undefined}>
+                                  <span className={`text-xs w-16 text-right flex-shrink-0 ${isAnomaly ? "text-orange-500 font-medium" : "text-gray-500"}`}>
                                     {isAnomaly && "⚠ "}ø {fmtDuration(f.avgMinutes)}
                                   </span>
                                 </div>
                               );
                             })}
-                            {filtered.length === 0 && <p className="text-xs text-gray-400">Žádná shoda</p>}
                           </div>
                         );
                       })()}
