@@ -8,6 +8,10 @@ import { desc, eq } from "drizzle-orm";
 const VALID_TYPES = new Set(["vyklada", "naklada", "obe"]);
 const VALID_LANGS = new Set(["cs", "sk", "pl", "de"]);
 
+function sanitize(s: string): string {
+  return s.replace(/<[^>]*>/g, "").trim();
+}
+
 // Per-isolate rate limiter: max 5 registrations per IP per minute
 const rlMap = new Map<string, number[]>();
 function isRateLimited(ip: string): boolean {
@@ -77,7 +81,7 @@ export async function POST(req: NextRequest) {
 
   const [driver] = await db
     .insert(drivers)
-    .values({ num, name: name.trim(), phone: phone.trim(), spz: spz.trim().toUpperCase(), firm: firm.trim(), order: order?.trim() || null, type, lang })
+    .values({ num, name: sanitize(name), phone: sanitize(phone), spz: sanitize(spz).toUpperCase(), firm: sanitize(firm), order: order ? sanitize(order) || null : null, type, lang })
     .returning();
 
   // Write audit log

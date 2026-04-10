@@ -163,13 +163,20 @@ export default function OperatorPage() {
   const [rampRows, setRampRows] = useState<Ramp[]>([]);
   const [auditData, setAuditData] = useState<AuditLog[]>([]);
   const [tab, setTab] = useState<"active" | "history" | "stats">("active");
-  const [password, setPassword] = useState(() =>
-    typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("pass") ?? "") : ""
-  );
+  const [password, setPassword] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("pass")
+      ?? sessionStorage.getItem("op_session")
+      ?? "";
+  });
   const [operatorName, setOperatorName] = useState(() =>
     typeof window !== "undefined" ? (localStorage.getItem("operatorName") ?? "") : ""
   );
-  const [authed, setAuthed] = useState(false);
+  const [authed, setAuthed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const stored = sessionStorage.getItem("op_session");
+    return (stored?.length ?? 0) >= 3;
+  });
   const [authError, setAuthError] = useState(false);
   const [rampModal, setRampModal] = useState<Driver | null>(null);
   const [selectedRamp, setSelectedRamp] = useState("1");
@@ -298,6 +305,7 @@ export default function OperatorPage() {
     e.preventDefault();
     if (password.length >= 3) {
       if (operatorName) localStorage.setItem("operatorName", operatorName);
+      sessionStorage.setItem("op_session", password);
       setAuthed(true); setAuthError(false);
     } else setAuthError(true);
   }
@@ -362,7 +370,7 @@ export default function OperatorPage() {
   if (!authed) {
     return (
       <div className="min-h-screen bg-[#065A82] flex items-center justify-center">
-        <form onSubmit={handleAuth} className="bg-white rounded-2xl p-8 w-80 shadow-xl">
+        <form method="post" onSubmit={handleAuth} className="bg-white rounded-2xl p-8 w-80 shadow-xl">
           <h1 className="text-xl font-bold text-gray-900 mb-1">Operátorský panel</h1>
           <p className="text-gray-500 text-sm mb-6">Zadejte heslo pro přístup</p>
           <input type="text" value={operatorName} onChange={e => setOperatorName(e.target.value)} placeholder="Vaše jméno (nepovinné)"
@@ -426,7 +434,7 @@ export default function OperatorPage() {
           <button onClick={() => setShowResetDialog(true)} className="text-xs bg-red-600/70 hover:bg-red-600 px-2 py-1 rounded text-white" title="Smazat všechna data (testování)">
             🗑 Reset
           </button>
-          <button onClick={() => setAuthed(false)} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
+          <button onClick={() => { sessionStorage.removeItem("op_session"); setAuthed(false); }} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
         </div>
       </header>
 

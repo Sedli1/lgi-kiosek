@@ -6,6 +6,10 @@ import { eq } from "drizzle-orm";
 
 const VALID_TYPES = new Set(["vyklada", "naklada", "obe"]);
 
+function sanitize(s: string): string {
+  return s.replace(/<[^>]*>/g, "").trim();
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -39,13 +43,13 @@ export async function PATCH(
   }
 
   const updates: Partial<{ name: string; spz: string; firm: string; phone: string; type: string; order: string | null; note: string | null }> = {};
-  if (name !== undefined) updates.name = name?.trim() ?? "";
-  if (spz !== undefined) updates.spz = spz?.trim().toUpperCase() ?? "";
-  if (firm !== undefined) updates.firm = firm?.trim() ?? "";
-  if (phone !== undefined) updates.phone = phone?.trim() ?? "";
+  if (name !== undefined) updates.name = name ? sanitize(name) : "";
+  if (spz !== undefined) updates.spz = spz ? sanitize(spz).toUpperCase() : "";
+  if (firm !== undefined) updates.firm = firm ? sanitize(firm) : "";
+  if (phone !== undefined) updates.phone = phone ? sanitize(phone) : "";
   if (type !== undefined) updates.type = type ?? current.type;
-  if (order !== undefined) updates.order = order?.trim() || null;
-  if (note !== undefined) updates.note = note?.trim() || null;
+  if (order !== undefined) updates.order = order ? sanitize(order) || null : null;
+  if (note !== undefined) updates.note = note ? sanitize(note) || null : null;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
