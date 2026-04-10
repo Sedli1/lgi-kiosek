@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 import { drivers, smsLogs, auditLogs } from "@/db/schema";
 import { buildConfirmSms, Lang } from "@/lib/sms";
 import { requireOperator } from "@/lib/auth";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and, inArray } from "drizzle-orm";
 
 const VALID_TYPES = new Set(["vyklada", "naklada", "obe"]);
 const VALID_LANGS = new Set(["cs", "sk", "pl", "de"]);
@@ -12,14 +12,14 @@ function sanitize(s: string): string {
   return s.replace(/<[^>]*>/g, "").trim();
 }
 
-// Per-isolate rate limiter: max 5 registrations per IP per minute
-const rlMap = new Map<string, number[]>();
+// Per-isolate sliding window rate limiter: max 5 registrations per IP per minute
+const rlMap = new Map<string, { n: number; until: number }>();
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
-  const hits = (rlMap.get(ip) ?? []).filter((t) => t > now - 60_000);
-  if (hits.length >= 5) return true;
-  hits.push(now);
-  rlMap.set(ip, hits);
+  const e = rlMap.get(ip);
+  if (!e || now > e.until) { rlMap.set(ip, { n: 1, until: now + 60_000 }); return false; }
+  if (e.n >= 5) return true;
+  e.n++;
   return false;
 }
 
@@ -81,12 +81,21 @@ export async function POST(req: NextRequest) {
   }
 
   const db = await getDb();
+
+  // Duplicitní SPZ: odmítnout pokud je SPZ již aktivní ve frontě
+  const cleanSpz = sanitize(spz).toUpperCase();
+  const activeWithSpz = await db.select({ id: drivers.id }).from(drivers)
+    .where(and(eq(drivers.spz, cleanSpz), inArray(drivers.status, ["wait", "ramp"])));
+  if (activeWithSpz.length > 0) {
+    return NextResponse.json({ error: "SPZ je již aktivní ve frontě" }, { status: 409 });
+  }
+
   const count = await db.$count(drivers);
   const num = count + 1;
 
   const [driver] = await db
     .insert(drivers)
-    .values({ num, name: sanitize(name), phone: sanitize(phone), spz: sanitize(spz).toUpperCase(), firm: sanitize(firm), order: order ? sanitize(order) || null : null, type, lang })
+    .values({ num, name: sanitize(name), phone: sanitize(phone), spz: cleanSpz, firm: sanitize(firm), order: order ? sanitize(order) || null : null, type, lang })
     .returning();
 
   // Write audit log

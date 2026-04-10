@@ -166,7 +166,7 @@ export default function OperatorPage() {
   const [password, setPassword] = useState(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("pass")
-      ?? sessionStorage.getItem("op_session")
+      ?? sessionStorage.getItem("op_pass")
       ?? "";
   });
   const [operatorName, setOperatorName] = useState(() =>
@@ -174,7 +174,7 @@ export default function OperatorPage() {
   );
   const [authed, setAuthed] = useState(() => {
     if (typeof window === "undefined") return false;
-    const stored = sessionStorage.getItem("op_session");
+    const stored = sessionStorage.getItem("op_pass");
     return (stored?.length ?? 0) >= 3;
   });
   const [authError, setAuthError] = useState(false);
@@ -305,7 +305,7 @@ export default function OperatorPage() {
     e.preventDefault();
     if (password.length >= 3) {
       if (operatorName) localStorage.setItem("operatorName", operatorName);
-      sessionStorage.setItem("op_session", password);
+      sessionStorage.setItem("op_pass", password);
       setAuthed(true); setAuthError(false);
     } else setAuthError(true);
   }
@@ -434,7 +434,7 @@ export default function OperatorPage() {
           <button onClick={() => setShowResetDialog(true)} className="text-xs bg-red-600/70 hover:bg-red-600 px-2 py-1 rounded text-white" title="Smazat všechna data (testování)">
             🗑 Reset
           </button>
-          <button onClick={() => { sessionStorage.removeItem("op_session"); setAuthed(false); }} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
+          <button onClick={() => { sessionStorage.removeItem("op_pass"); localStorage.removeItem("operatorName"); setAuthed(false); setOperatorName(""); }} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
         </div>
       </header>
 
