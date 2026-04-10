@@ -47,6 +47,11 @@ export const auditLogs = sqliteTable("AuditLog", {
   createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const sessions = sqliteTable("Session", {
+  token: text("token").primaryKey(),
+  expiresAt: text("expiresAt").notNull(),
+});
+
 export type Driver = typeof drivers.$inferSelect;
 export type SmsLogRow = typeof smsLogs.$inferSelect;
 export type Ramp = typeof ramps.$inferSelect;
