@@ -211,38 +211,61 @@ export default function OperatorPage() {
     }
   }, [authed]);
 
-  // SSE
+  // SSE — fetch-based (podporuje custom headers, heslo není v URL)
   useEffect(() => {
     if (!authed) return;
-    let es: EventSource | null = null;
-    const connect = () => {
-      es = new EventSource(`/api/stream?pass=${encodeURIComponent(password)}`);
-      es.onopen = () => setConnected(true);
-      es.onmessage = (e) => {
-        const data = JSON.parse(e.data) as { drivers: Driver[]; ramps: Ramp[]; auditLogs: AuditLog[] };
-        // Detect new drivers → chime + browser notification + tab blink
-        let hasNew = false;
-        for (const d of data.drivers) {
-          if (!prevDriverIds.current.has(d.id) && prevDriverIds.current.size > 0) {
-            hasNew = true;
-            playChime();
-            if (notifGranted.current) new Notification("Nový řidič", { body: `${d.name} · ${d.spz} · ${d.firm}`, icon: "/icon-192.png" });
+    let aborted = false;
+    const ctrl = new AbortController();
+
+    const processData = (raw: string) => {
+      const data = JSON.parse(raw) as { drivers: Driver[]; ramps: Ramp[]; auditLogs: AuditLog[] };
+      let hasNew = false;
+      for (const d of data.drivers) {
+        if (!prevDriverIds.current.has(d.id) && prevDriverIds.current.size > 0) {
+          hasNew = true;
+          playChime();
+          if (notifGranted.current) new Notification("Nový řidič", { body: `${d.name} · ${d.spz} · ${d.firm}`, icon: "/icon-192.png" });
+        }
+      }
+      if (hasNew) {
+        let on = true;
+        const blink = setInterval(() => { document.title = on ? "🔔 Nový řidič!" : "LGI Operátor"; on = !on; }, 700);
+        setTimeout(() => { clearInterval(blink); document.title = "LGI Operátor"; }, 10000);
+      }
+      prevDriverIds.current = new Set(data.drivers.map(d => d.id));
+      setDrivers(data.drivers.map(d => ({ ...d, smsLogs: (d as any).smsLogs ?? [] })));
+      setRampRows(data.ramps);
+      setAuditData(data.auditLogs);
+    };
+
+    const connect = async () => {
+      try {
+        setConnected(false);
+        const res = await fetch("/api/stream", { headers: authHeaders(), signal: ctrl.signal });
+        if (!res.ok || !res.body) throw new Error("bad response");
+        setConnected(true);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          for (const chunk of parts) {
+            const m = chunk.match(/^data: (.+)$/m);
+            if (m) try { processData(m[1]); } catch {}
           }
         }
-        if (hasNew) {
-          let on = true;
-          const blink = setInterval(() => { document.title = on ? "🔔 Nový řidič!" : "LGI Operátor"; on = !on; }, 700);
-          setTimeout(() => { clearInterval(blink); document.title = "LGI Operátor"; }, 10000);
-        }
-        prevDriverIds.current = new Set(data.drivers.map(d => d.id));
-        setDrivers(data.drivers.map(d => ({ ...d, smsLogs: (d as any).smsLogs ?? [] })));
-        setRampRows(data.ramps);
-        setAuditData(data.auditLogs);
-      };
-      es.onerror = () => { setConnected(false); es?.close(); setTimeout(connect, 3000); };
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+      }
+      if (!aborted) { setConnected(false); setTimeout(connect, 3000); }
     };
+
     connect();
-    return () => { es?.close(); };
+    return () => { aborted = true; ctrl.abort(); };
   }, [authed, password]);
 
   // Load stats
@@ -251,7 +274,7 @@ export default function OperatorPage() {
     setStats(null);
     const from = periodToFrom(statsPeriod);
     const qs = (from ? `&from=${encodeURIComponent(from)}` : "") + (statsTypeFilter !== "all" ? `&type=${statsTypeFilter}` : "");
-    fetch(`/api/stats?pass=${encodeURIComponent(password)}${qs}`, { headers: authHeaders() })
+    fetch(`/api/stats?${qs.replace(/^&/, "")}`, { headers: authHeaders() })
       .then(r => r.json()).then(d => setStats(d as StatsData)).catch(() => {});
   }, [tab, authed, password, statsPeriod, statsTypeFilter]);
 
@@ -282,7 +305,7 @@ export default function OperatorPage() {
   async function assignRamp() {
     if (!rampModal) return;
     setSending(true);
-    await fetch(`/api/drivers/${rampModal.id}/ramp?pass=${encodeURIComponent(password)}`, {
+    await fetch(`/api/drivers/${rampModal.id}/ramp`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime, skipSms }),
     });
@@ -290,31 +313,31 @@ export default function OperatorPage() {
   }
 
   async function cancelDriver(id: number) {
-    await fetch(`/api/drivers/${id}?pass=${encodeURIComponent(password)}`, { method: "DELETE", headers: authHeaders() });
+    await fetch(`/api/drivers/${id}`, { method: "DELETE", headers: authHeaders() });
     setCancelConfirmId(null);
   }
 
   async function markDone(id: number) {
-    await fetch(`/api/drivers/${id}/done?pass=${encodeURIComponent(password)}`, { method: "PATCH", headers: authHeaders() });
+    await fetch(`/api/drivers/${id}/done`, { method: "PATCH", headers: authHeaders() });
   }
 
   async function toggleRampRepair(ramp: Ramp) {
     const newStatus = ramp.status === "repair" ? "available" : "repair";
-    await fetch(`/api/ramps?pass=${encodeURIComponent(password)}`, {
+    await fetch(`/api/ramps`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ id: ramp.id, status: newStatus }),
     });
   }
 
   async function resetData() {
-    await fetch(`/api/reset?pass=${encodeURIComponent(password)}&confirm=yes`, { method: "DELETE", headers: authHeaders() });
+    await fetch(`/api/reset?confirm=yes`, { method: "DELETE", headers: authHeaders() });
     setShowResetDialog(false);
   }
 
   async function saveEdit() {
     if (!editModal) return;
     setEditSending(true);
-    await fetch(`/api/drivers/${editModal.id}?pass=${encodeURIComponent(password)}`, {
+    await fetch(`/api/drivers/${editModal.id}`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ...editForm, note: editForm.note.trim() || null }),
     });
@@ -325,7 +348,7 @@ export default function OperatorPage() {
   async function addDriver() {
     if (!addForm.name || !addForm.phone || !addForm.spz || !addForm.firm) return;
     setAddSending(true);
-    const res = await fetch(`/api/drivers?pass=${encodeURIComponent(password)}`, {
+    const res = await fetch(`/api/drivers`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(addForm),
     });
