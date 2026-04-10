@@ -75,6 +75,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Field too long" }, { status: 400 });
   }
 
+  // SPZ: 2–15 alphanumeric chars, spaces or hyphens allowed
+  if (!/^[A-Za-z0-9][A-Za-z0-9 \-]{0,13}[A-Za-z0-9]$|^[A-Za-z0-9]{2}$/.test(spz.trim())) {
+    return NextResponse.json({ error: "Invalid SPZ format" }, { status: 400 });
+  }
+
   const db = await getDb();
   const count = await db.$count(drivers);
   const num = count + 1;

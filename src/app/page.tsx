@@ -388,6 +388,9 @@ export default function KioskPage() {
               {t.name} <span className="text-red-500">*</span>
             </label>
             <input
+              name="name"
+              autoComplete="name"
+              maxLength={100}
               value={values.name}
               placeholder="Jan Novák"
               onChange={(e) => handleInputChange("name", e.target.value)}
@@ -416,6 +419,9 @@ export default function KioskPage() {
                 <option value="+40">+40</option>
               </select>
               <input
+                name="phone"
+                autoComplete="tel"
+                maxLength={30}
                 value={values.phone}
                 placeholder="123 456 789"
                 onChange={(e) => handleInputChange("phone", e.target.value)}
@@ -433,6 +439,9 @@ export default function KioskPage() {
                 {t.spz} <span className="text-red-500">*</span>
               </label>
               <input
+                name="spz"
+                autoComplete="off"
+                maxLength={15}
                 value={values.spz}
                 placeholder="1AB 2345"
                 onChange={(e) => handleInputChange("spz", e.target.value)}
@@ -446,6 +455,9 @@ export default function KioskPage() {
                 {t.firm} <span className="text-red-500">*</span>
               </label>
               <input
+                name="firm"
+                autoComplete="organization"
+                maxLength={100}
                 value={values.firm}
                 placeholder="Dopravní firma s.r.o."
                 onChange={(e) => handleInputChange("firm", e.target.value)}
@@ -459,6 +471,9 @@ export default function KioskPage() {
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1">{t.order}</label>
             <input
+              name="order"
+              autoComplete="off"
+              maxLength={100}
               value={values.order}
               placeholder="ORD-12345"
               onChange={(e) => handleInputChange("order", e.target.value)}

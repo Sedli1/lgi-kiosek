@@ -28,6 +28,15 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: CSP },
         ],
       },
+      // Disable CDN caching for HTML pages — prevent stale UI after deploy
+      {
+        source: "/",
+        headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }],
+      },
+      {
+        source: "/operator",
+        headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }],
+      },
     ];
   },
 };
