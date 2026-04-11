@@ -4,7 +4,7 @@ import { sessions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function requireOperator(req: NextRequest): Promise<NextResponse | null> {
-  const token = req.headers.get("x-session-token") ?? "";
+  const token = req.cookies.get("op_token")?.value ?? "";
 
   if (!token || token.length !== 64) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

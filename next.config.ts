@@ -3,9 +3,12 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 initOpenNextCloudflareForDev();
 
+// unsafe-eval je potřeba pouze v React dev módu (debugging callstacks).
+// V produkci React eval() nikdy nepoužívá.
+const isDev = process.env.NODE_ENV !== "production";
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
@@ -22,13 +25,16 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: CSP },
 ];
 
+const noStore = { key: "Cache-Control", value: "no-store, must-revalidate" };
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
     return [
       { source: "/(.*)", headers: securityHeaders },
-      { source: "/", headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }] },
-      { source: "/operator", headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }] },
+      { source: "/", headers: [noStore] },
+      { source: "/operator", headers: [noStore] },
+      { source: "/api/(.*)", headers: [noStore] },
     ];
   },
 };

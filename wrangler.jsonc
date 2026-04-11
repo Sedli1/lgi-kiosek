@@ -11,7 +11,8 @@
     {
       "binding": "DB",
       "database_name": "lgi-kiosek-db",
-      "database_id": "c8256e40-2629-4963-b8f3-dcac49a4c27c"
+      "database_id": "c8256e40-2629-4963-b8f3-dcac49a4c27c",
+      "migrations_dir": "migrations"
     }
   ]
 }

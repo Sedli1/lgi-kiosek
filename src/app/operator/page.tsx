@@ -164,16 +164,11 @@ export default function OperatorPage() {
   const [auditData, setAuditData] = useState<AuditLog[]>([]);
   const [tab, setTab] = useState<"active" | "history" | "stats">("active");
   const [password, setPassword] = useState("");
-  const [sessionToken, setSessionToken] = useState(() =>
-    typeof window !== "undefined" ? (sessionStorage.getItem("op_token") ?? "") : ""
-  );
   const [operatorName, setOperatorName] = useState(() =>
     typeof window !== "undefined" ? (localStorage.getItem("operatorName") ?? "") : ""
   );
-  const [authed, setAuthed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return (sessionStorage.getItem("op_token")?.length ?? 0) === 64;
-  });
+  const [authed, setAuthed] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [authError, setAuthError] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [rampModal, setRampModal] = useState<Driver | null>(null);
@@ -206,6 +201,14 @@ export default function OperatorPage() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
   const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
   const [historyDetailModal, setHistoryDetailModal] = useState<Driver | null>(null);
+
+  // Zkontrolovat session cookie při načtení stránky
+  useEffect(() => {
+    fetch("/api/auth")
+      .then(r => r.json())
+      .then((d: unknown) => { setAuthed((d as { authed: boolean }).authed === true); setAuthChecked(true); })
+      .catch(() => setAuthChecked(true));
+  }, []);
 
   // Request notification permission
   useEffect(() => {
@@ -271,7 +274,7 @@ export default function OperatorPage() {
 
     connect();
     return () => { aborted = true; ctrl.abort(); };
-  }, [authed, password]);
+  }, [authed]);
 
   // Load stats
   useEffect(() => {
@@ -281,7 +284,7 @@ export default function OperatorPage() {
     const qs = (from ? `&from=${encodeURIComponent(from)}` : "") + (statsTypeFilter !== "all" ? `&type=${statsTypeFilter}` : "");
     fetch(`/api/stats?${qs.replace(/^&/, "")}`, { headers: authHeaders() })
       .then(r => r.json()).then(d => setStats(d as StatsData)).catch(() => {});
-  }, [tab, authed, password, statsPeriod, statsTypeFilter]);
+  }, [tab, authed, statsPeriod, statsTypeFilter]);
 
   // Auto-login from URL ?pass= (pre-fill password field, still requires server auth)
   useEffect(() => {
@@ -297,7 +300,7 @@ export default function OperatorPage() {
   }, [selectedRamp, rampModal, drivers]);
 
   function authHeaders(extra?: Record<string, string>): Record<string, string> {
-    return { "x-session-token": sessionToken, ...(operatorName ? { "x-operator-name": operatorName } : {}), ...extra };
+    return { ...(operatorName ? { "x-operator-name": operatorName } : {}), ...extra };
   }
 
   async function handleAuth(e: React.FormEvent) {
@@ -311,10 +314,7 @@ export default function OperatorPage() {
         body: JSON.stringify({ password }),
       });
       if (!res.ok) { setAuthError(true); setAuthLoading(false); return; }
-      const { token } = await res.json() as { token: string };
       if (operatorName) localStorage.setItem("operatorName", operatorName);
-      sessionStorage.setItem("op_token", token);
-      setSessionToken(token);
       setPassword(""); // heslo okamžitě zahodit
       setAuthed(true);
       setAuthError(false);
@@ -376,6 +376,16 @@ export default function OperatorPage() {
     if (res.ok) { setAddModal(false); setAddForm({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" }); }
   }
 
+
+  // ── Loading state ─────────────────────────────────────────
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-[#065A82] flex items-center justify-center">
+        <div className="text-white text-lg opacity-70">Načítám…</div>
+      </div>
+    );
+  }
 
   // ── Login screen ──────────────────────────────────────────
 
@@ -450,11 +460,9 @@ export default function OperatorPage() {
             🗑 Reset
           </button>
           <button onClick={async () => {
-            const tok = sessionStorage.getItem("op_token") ?? "";
-            sessionStorage.removeItem("op_token");
             localStorage.removeItem("operatorName");
-            if (tok) await fetch("/api/auth", { method: "DELETE", headers: { "x-session-token": tok } }).catch(() => {});
-            setSessionToken(""); setOperatorName(""); setAuthed(false);
+            await fetch("/api/auth", { method: "DELETE" }).catch(() => {});
+            setOperatorName(""); setAuthed(false);
           }} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
         </div>
       </header>

@@ -52,6 +52,12 @@ export const sessions = sqliteTable("Session", {
   expiresAt: text("expiresAt").notNull(),
 });
 
+export const authAttempts = sqliteTable("AuthAttempt", {
+  ip: text("ip").primaryKey(),
+  count: integer("count").notNull().default(0),
+  windowStart: text("windowStart").notNull(),
+});
+
 export type Driver = typeof drivers.$inferSelect;
 export type SmsLogRow = typeof smsLogs.$inferSelect;
 export type Ramp = typeof ramps.$inferSelect;
