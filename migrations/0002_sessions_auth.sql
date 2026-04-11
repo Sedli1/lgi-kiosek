@@ -11,5 +11,3 @@ CREATE TABLE IF NOT EXISTS AuthAttempt (
   windowStart TEXT NOT NULL
 );
 
--- Přidat operatorName do AuditLog (pokud ještě neexistuje)
-ALTER TABLE AuditLog ADD COLUMN operatorName TEXT;
