@@ -43,7 +43,7 @@ export async function PATCH(
     ? `Rampa ${ramp}, čas: ${rampTime} — SMS neposlána`
     : `Rampa ${ramp}, čas: ${rampTime}`;
 
-  db.insert(auditLogs)
+  await db.insert(auditLogs)
     .values({ driverId: driver.id, action: "ramp_assigned", ramp: String(ramp), note: auditNote, operatorName })
     .catch((err) => console.error("Audit log failed:", err));
 

@@ -663,14 +663,14 @@ export default function OperatorPage() {
                     title="Upravit záznam">
                     Upravit
                   </button>
-                  {d.status === "wait" && cancelConfirmId !== d.id && (
+                  {["wait","ramp"].includes(d.status) && cancelConfirmId !== d.id && (
                     <button onClick={() => setCancelConfirmId(d.id)}
                       className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-400 hover:border-red-300 hover:text-red-500 hover:bg-red-50 flex-shrink-0"
-                      title="Zrušit čekání">
+                      title="Zrušit registraci">
                       ✕
                     </button>
                   )}
-                  {d.status === "wait" && cancelConfirmId === d.id && (
+                  {["wait","ramp"].includes(d.status) && cancelConfirmId === d.id && (
                     <div className="flex gap-1 flex-shrink-0">
                       <button onClick={() => cancelDriver(d.id)} className="bg-red-600 text-white text-xs px-2 py-1 rounded-lg font-semibold">Zrušit?</button>
                       <button onClick={() => setCancelConfirmId(null)} className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-lg">Ne</button>

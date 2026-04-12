@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
   db.delete(sessions).where(lt(sessions.expiresAt, new Date().toISOString())).catch(() => {});
 
   // Audit log: přihlášení
-  db.insert(auditLogs).values({
+  await db.insert(auditLogs).values({
     driverId: null, action: "login", ramp: null,
     note: null, operatorName: operatorRecord.username,
   }).catch(() => {});
@@ -127,7 +127,7 @@ export async function DELETE(req: NextRequest) {
     const db = await getDb();
     const [session] = await db.select().from(sessions).where(eq(sessions.token, token));
     if (session?.operatorUsername) {
-      db.insert(auditLogs).values({
+      await db.insert(auditLogs).values({
         driverId: null, action: "logout", ramp: null,
         note: null, operatorName: session.operatorUsername,
       }).catch(() => {});

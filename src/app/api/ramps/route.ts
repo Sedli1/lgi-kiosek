@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest) {
     .returning();
 
   if (current && current.status !== body.status) {
-    db.insert(auditLogs).values({
+    await db.insert(auditLogs).values({
       driverId: null, action: "ramp_repair", ramp: current.name,
       note: `Rampa ${current.name}: ${current.status} → ${body.status}`,
       operatorName: auth.operator.username,

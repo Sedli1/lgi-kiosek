@@ -63,13 +63,13 @@ export async function PATCH(
 
   // Audit log
   if (updates.role !== undefined) {
-    db.insert(auditLogs).values({
+    await db.insert(auditLogs).values({
       driverId: null, action: "role_changed", ramp: null,
       note: `${target.username}: ${target.role} → ${updates.role}`, operatorName: auth.operator.username,
     }).catch(() => {});
   }
   if (updates.passwordHash !== undefined) {
-    db.insert(auditLogs).values({
+    await db.insert(auditLogs).values({
       driverId: null, action: "password_changed", ramp: null,
       note: `Změna hesla: ${target.username}`, operatorName: auth.operator.username,
     }).catch(() => {});
@@ -106,7 +106,7 @@ export async function DELETE(
   }
 
   // Audit log před smazáním
-  db.insert(auditLogs).values({
+  await db.insert(auditLogs).values({
     driverId: null, action: "user_deleted", ramp: null,
     note: `Smazán: ${target.username} (${target.role})`, operatorName: auth.operator.username,
   }).catch(() => {});

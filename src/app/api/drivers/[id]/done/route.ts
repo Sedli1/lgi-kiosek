@@ -22,7 +22,7 @@ export async function PATCH(
     .where(eq(drivers.id, Number(id)))
     .returning();
 
-  db.insert(auditLogs)
+  await db.insert(auditLogs)
     .values({ driverId: Number(id), action: "done", ramp: updated?.ramp ?? null, note: null, operatorName })
     .catch((err) => console.error("Audit log failed:", err));
 

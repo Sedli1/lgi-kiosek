@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const [op] = await db.insert(operators).values({ username, passwordHash, role }).returning();
-    db.insert(auditLogs).values({
+    await db.insert(auditLogs).values({
       driverId: null, action: "user_created", ramp: null,
       note: `Vytvořen: ${username} (${role})`, operatorName: auth.operator.username,
     }).catch(() => {});

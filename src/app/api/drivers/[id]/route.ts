@@ -77,7 +77,7 @@ export async function PATCH(
   }
 
   if (changes.length > 0) {
-    db.insert(auditLogs)
+    await db.insert(auditLogs)
       .values({
         driverId: Number(id),
         action: "edited",
@@ -104,8 +104,8 @@ export async function DELETE(
 
   const [driver] = await db.select().from(drivers).where(eq(drivers.id, Number(id)));
   if (!driver) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (driver.status !== "wait") {
-    return NextResponse.json({ error: "Pouze čekající řidiči mohou být zrušeni" }, { status: 400 });
+  if (!["wait", "ramp"].includes(driver.status)) {
+    return NextResponse.json({ error: "Pouze aktivní řidiči mohou být zrušeni" }, { status: 400 });
   }
 
   await db
@@ -113,8 +113,8 @@ export async function DELETE(
     .set({ status: "done", doneAt: new Date().toISOString(), note: "Zrušeno operátorem" })
     .where(eq(drivers.id, Number(id)));
 
-  db.insert(auditLogs)
-    .values({ driverId: Number(id), action: "cancelled", ramp: null, note: "Zrušeno operátorem", operatorName })
+  await db.insert(auditLogs)
+    .values({ driverId: Number(id), action: "cancelled", ramp: driver.ramp ?? null, note: "Zrušeno operátorem", operatorName })
     .catch((err) => console.error("Audit cancel failed:", err));
 
   return NextResponse.json({ ok: true });
