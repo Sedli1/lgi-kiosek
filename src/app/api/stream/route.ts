@@ -7,8 +7,8 @@ import { desc } from "drizzle-orm";
 // SSE endpoint: sends updates every 2s for up to 25s, then closes.
 // EventSource on the client auto-reconnects, giving near-realtime updates.
 export async function GET(req: NextRequest) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const encoder = new TextEncoder();
   let closed = false;

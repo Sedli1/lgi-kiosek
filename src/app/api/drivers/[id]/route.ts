@@ -14,11 +14,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const { id } = await params;
-  const operatorName = req.headers.get("x-operator-name") ?? null;
+  const operatorName = auth.operator.username;
   const body = (await req.json()) as Record<string, unknown>;
   const { name, spz, firm, phone, type, order, note } = body as Record<string, string | null | undefined>;
 
@@ -95,11 +95,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const { id } = await params;
-  const operatorName = req.headers.get("x-operator-name") ?? null;
+  const operatorName = auth.operator.username;
   const db = await getDb();
 
   const [driver] = await db.select().from(drivers).where(eq(drivers.id, Number(id)));

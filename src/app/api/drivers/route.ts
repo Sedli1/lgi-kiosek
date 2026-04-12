@@ -24,8 +24,8 @@ function isRateLimited(ip: string): boolean {
 }
 
 export async function GET(req: NextRequest) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const db = await getDb();
   const rows = await db.select().from(drivers).orderBy(desc(drivers.createdAt));

@@ -50,6 +50,9 @@ export const auditLogs = sqliteTable("AuditLog", {
 export const sessions = sqliteTable("Session", {
   token: text("token").primaryKey(),
   expiresAt: text("expiresAt").notNull(),
+  operatorId: integer("operatorId"),
+  operatorUsername: text("operatorUsername"),
+  operatorRole: text("operatorRole").default("operator"),
 });
 
 export const authAttempts = sqliteTable("AuthAttempt", {
@@ -58,7 +61,17 @@ export const authAttempts = sqliteTable("AuthAttempt", {
   windowStart: text("windowStart").notNull(),
 });
 
+export const operators = sqliteTable("Operator", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  username: text("username").notNull().unique(),
+  passwordHash: text("passwordHash").notNull(),
+  role: text("role").notNull().default("operator"), // 'admin' | 'operator'
+  createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
+  active: integer("active").notNull().default(1),
+});
+
 export type Driver = typeof drivers.$inferSelect;
 export type SmsLogRow = typeof smsLogs.$inferSelect;
 export type Ramp = typeof ramps.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type Operator = typeof operators.$inferSelect;

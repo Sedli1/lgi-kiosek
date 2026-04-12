@@ -9,11 +9,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const { id } = await params;
-  const operatorName = req.headers.get("x-operator-name") ?? null;
+  const operatorName = auth.operator.username;
   const body = (await req.json()) as { ramp: string; rampTime?: string; skipSms?: boolean };
   const { ramp, rampTime: operatorTime, skipSms } = body;
 

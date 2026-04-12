@@ -8,11 +8,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const { id } = await params;
-  const operatorName = req.headers.get("x-operator-name") ?? null;
+  const operatorName = auth.operator.username;
   const db = await getDb();
   const doneAt = new Date().toISOString();
 

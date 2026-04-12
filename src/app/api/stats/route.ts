@@ -17,8 +17,8 @@ function toSqliteDate(d: Date): string {
 }
 
 export async function GET(req: NextRequest) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const url = req.nextUrl;
   const fromParam = url.searchParams.get("from"); // ISO string or null

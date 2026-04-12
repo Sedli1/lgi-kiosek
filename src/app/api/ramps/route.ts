@@ -5,8 +5,8 @@ import { requireOperator } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const db = await getDb();
   const rows = await db.select().from(ramps).orderBy(ramps.name);
@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   const body = (await req.json()) as { id: number; status: string; note?: string };
   if (!body.id || !body.status) {

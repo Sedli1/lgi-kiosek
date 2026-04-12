@@ -162,11 +162,11 @@ export default function OperatorPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [rampRows, setRampRows] = useState<Ramp[]>([]);
   const [auditData, setAuditData] = useState<AuditLog[]>([]);
-  const [tab, setTab] = useState<"active" | "history" | "stats">("active");
+  const [tab, setTab] = useState<"active" | "history" | "stats" | "users">("active");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [operatorName, setOperatorName] = useState(() =>
-    typeof window !== "undefined" ? (localStorage.getItem("operatorName") ?? "") : ""
-  );
+  const [operatorUsername, setOperatorUsername] = useState("");
+  const [operatorRole, setOperatorRole] = useState("operator");
   const [authed, setAuthed] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [authError, setAuthError] = useState(false);
@@ -201,12 +201,30 @@ export default function OperatorPage() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
   const [historyTypeFilter, setHistoryTypeFilter] = useState("all");
   const [historyDetailModal, setHistoryDetailModal] = useState<Driver | null>(null);
+  const [opList, setOpList] = useState<{id:number;username:string;role:string;createdAt:string;active:number}[]>([]);
+  const [opListLoading, setOpListLoading] = useState(false);
+  const [addOpModal, setAddOpModal] = useState(false);
+  const [addOpForm, setAddOpForm] = useState({ username: "", password: "", role: "operator" });
+  const [addOpError, setAddOpError] = useState("");
+  const [addOpSending, setAddOpSending] = useState(false);
+  const [deleteOpId, setDeleteOpId] = useState<number | null>(null);
+  const [changePassModal, setChangePassModal] = useState<{id:number;username:string}|null>(null);
+  const [changePassValue, setChangePassValue] = useState("");
+  const [changePassError, setChangePassError] = useState("");
 
   // Zkontrolovat session cookie při načtení stránky
   useEffect(() => {
     fetch("/api/auth")
       .then(r => r.json())
-      .then((d: unknown) => { setAuthed((d as { authed: boolean }).authed === true); setAuthChecked(true); })
+      .then((d: unknown) => {
+        const data = d as { authed: boolean; operator?: { username: string; role: string } };
+        setAuthed(data.authed === true);
+        if (data.operator) {
+          setOperatorUsername(data.operator.username);
+          setOperatorRole(data.operator.role);
+        }
+        setAuthChecked(true);
+      })
       .catch(() => setAuthChecked(true));
   }, []);
 
@@ -286,6 +304,16 @@ export default function OperatorPage() {
       .then(r => r.json()).then(d => setStats(d as StatsData)).catch(() => {});
   }, [tab, authed, statsPeriod, statsTypeFilter]);
 
+  // Načíst seznam operátorů při přechodu na záložku users
+  useEffect(() => {
+    if (tab !== "users" || !authed || operatorRole !== "admin") return;
+    setOpListLoading(true);
+    fetch("/api/operators", { headers: authHeaders() })
+      .then(r => r.json())
+      .then((d: unknown) => { setOpList(d as typeof opList); setOpListLoading(false); })
+      .catch(() => setOpListLoading(false));
+  }, [tab, authed, operatorRole]);
+
   // Auto-login from URL ?pass= (pre-fill password field, still requires server auth)
   useEffect(() => {
     if (typeof window === "undefined" || authed) return;
@@ -300,26 +328,84 @@ export default function OperatorPage() {
   }, [selectedRamp, rampModal, drivers]);
 
   function authHeaders(extra?: Record<string, string>): Record<string, string> {
-    return { ...(operatorName ? { "x-operator-name": operatorName } : {}), ...extra };
+    return { ...extra };
   }
 
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 3) { setAuthError(true); return; }
+    if (!username.trim() || password.length < 3) { setAuthError(true); return; }
     setAuthLoading(true);
     try {
       const res = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username: username.trim().toLowerCase(), password }),
       });
       if (!res.ok) { setAuthError(true); setAuthLoading(false); return; }
-      if (operatorName) localStorage.setItem("operatorName", operatorName);
-      setPassword(""); // heslo okamžitě zahodit
+      const data = await res.json() as { ok: boolean; operator: { username: string; role: string } };
+      setOperatorUsername(data.operator.username);
+      setOperatorRole(data.operator.role);
+      setPassword("");
       setAuthed(true);
       setAuthError(false);
     } catch { setAuthError(true); }
     setAuthLoading(false);
+  }
+
+  async function addOperator() {
+    if (!addOpForm.username || !addOpForm.password) return;
+    setAddOpSending(true);
+    setAddOpError("");
+    try {
+      const res = await fetch("/api/operators", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addOpForm),
+      });
+      const data = await res.json() as { error?: string; id?: number };
+      if (!res.ok) { setAddOpError(data.error ?? "Chyba"); setAddOpSending(false); return; }
+      setOpList(prev => [...prev, data as typeof opList[0]]);
+      setAddOpModal(false);
+      setAddOpForm({ username: "", password: "", role: "operator" });
+    } catch { setAddOpError("Chyba sítě"); }
+    setAddOpSending(false);
+  }
+
+  async function deleteOperator(id: number) {
+    await fetch(`/api/operators/${id}`, { method: "DELETE" });
+    setOpList(prev => prev.filter(op => op.id !== id));
+    setDeleteOpId(null);
+  }
+
+  async function toggleRole(op: typeof opList[0]) {
+    const newRole = op.role === "admin" ? "operator" : "admin";
+    const res = await fetch(`/api/operators/${op.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    if (res.ok) {
+      setOpList(prev => prev.map(o => o.id === op.id ? { ...o, role: newRole } : o));
+    }
+  }
+
+  async function changePassword() {
+    if (!changePassModal || changePassValue.length < 6) return;
+    setChangePassError("");
+    const res = await fetch(`/api/operators/${changePassModal.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: changePassValue }),
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) { setChangePassError(data.error ?? "Chyba"); return; }
+    setChangePassModal(null);
+    setChangePassValue("");
+    // Pokud je to vlastní heslo, odhlásit (session byla invalidována)
+    if (changePassModal.id === opList.find(o => o.username === operatorUsername)?.id) {
+      await fetch("/api/auth", { method: "DELETE" }).catch(() => {});
+      setAuthed(false);
+    }
   }
 
   async function assignRamp() {
@@ -394,13 +480,14 @@ export default function OperatorPage() {
       <div className="min-h-screen bg-[#065A82] flex items-center justify-center">
         <form method="post" onSubmit={handleAuth} className="bg-white rounded-2xl p-8 w-80 shadow-xl">
           <h1 className="text-xl font-bold text-gray-900 mb-1">Operátorský panel</h1>
-          <p className="text-gray-500 text-sm mb-6">Zadejte heslo pro přístup</p>
-          <input type="text" value={operatorName} onChange={e => setOperatorName(e.target.value)} placeholder="Vaše jméno (nepovinné)"
+          <p className="text-gray-500 text-sm mb-6">Přihlaste se svým účtem</p>
+          <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="Uživatelské jméno"
+            autoComplete="username"
             className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Heslo"
             autoComplete="current-password"
             className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
-          {authError && <p className="text-red-500 text-sm mb-3">Nesprávné heslo</p>}
+          {authError && <p className="text-red-500 text-sm mb-3">Nesprávné přihlašovací údaje</p>}
           <button type="submit" disabled={authLoading} className="w-full bg-[#065A82] text-white font-semibold py-3 rounded-xl hover:bg-[#054a6b] disabled:opacity-60">
             {authLoading ? "Přihlašuji…" : "Přihlásit"}
           </button>
@@ -452,6 +539,8 @@ export default function OperatorPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-sm text-blue-200">{operatorUsername}</span>
+          {operatorRole === "admin" && <span className="text-xs bg-purple-500/70 px-1.5 py-0.5 rounded text-white">admin</span>}
           <button onClick={() => { setAddForm({ name: "", phone: "", spz: "", firm: "", order: "", type: "vyklada", lang: "cs" }); setAddModal(true); }}
             className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white font-bold" title="Přidat řidiče ručně">
             + Přidat
@@ -460,9 +549,8 @@ export default function OperatorPage() {
             🗑 Reset
           </button>
           <button onClick={async () => {
-            localStorage.removeItem("operatorName");
             await fetch("/api/auth", { method: "DELETE" }).catch(() => {});
-            setOperatorName(""); setAuthed(false);
+            setOperatorUsername(""); setOperatorRole("operator"); setAuthed(false);
           }} className="text-blue-200 text-sm hover:text-white">Odhlásit</button>
         </div>
       </header>
@@ -502,6 +590,12 @@ export default function OperatorPage() {
                   {t==="stats" && "Statistiky"}
                 </button>
               ))}
+              {operatorRole === "admin" && (
+                <button onClick={() => setTab("users")}
+                  className={`flex-1 py-2.5 text-sm font-medium transition flex items-center justify-center gap-1.5 ${tab==="users" ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
+                  Uživatelé
+                </button>
+              )}
             </div>
 
             {/* Active drivers */}
@@ -961,6 +1055,115 @@ export default function OperatorPage() {
                   </div>
                   );
                 })()}
+              </div>
+            )}
+            {/* Users tab (admin only) */}
+            {tab === "users" && (
+              <div className="p-4 overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-semibold text-gray-800">Správa uživatelů</h2>
+                  <button onClick={() => { setAddOpForm({ username: "", password: "", role: "operator" }); setAddOpError(""); setAddOpModal(true); }}
+                    className="text-sm bg-[#065A82] text-white px-3 py-1.5 rounded-lg hover:bg-[#054a6b] font-medium">
+                    + Přidat uživatele
+                  </button>
+                </div>
+                {opListLoading ? (
+                  <div className="text-gray-400 text-sm text-center py-8">Načítám…</div>
+                ) : (
+                  <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                    {opList.length === 0 && <div className="px-4 py-6 text-gray-400 text-sm text-center">Žádní uživatelé</div>}
+                    {opList.map(op => (
+                      <div key={op.id} className="flex items-center justify-between px-4 py-3 gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium text-gray-900">{op.username}</span>
+                          {op.username === operatorUsername && <span className="text-xs text-gray-400">(já)</span>}
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${op.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                            {op.role === "admin" ? "admin" : "operátor"}
+                          </span>
+                        </div>
+                        <div className="flex gap-1.5 flex-shrink-0">
+                          <button onClick={() => { setChangePassModal({ id: op.id, username: op.username }); setChangePassValue(""); setChangePassError(""); }}
+                            className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:border-[#065A82] hover:text-[#065A82]">
+                            Heslo
+                          </button>
+                          <button onClick={() => toggleRole(op)}
+                            disabled={op.username === operatorUsername}
+                            className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:border-[#065A82] hover:text-[#065A82] disabled:opacity-40 disabled:cursor-not-allowed">
+                            {op.role === "admin" ? "→ Operátor" : "→ Admin"}
+                          </button>
+                          <button onClick={() => setDeleteOpId(op.id)}
+                            disabled={op.username === operatorUsername}
+                            className="text-xs px-2 py-1 rounded border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                            Smazat
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add operator modal */}
+                {addOpModal && (
+                  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-2xl p-6 w-80 shadow-xl">
+                      <h3 className="font-semibold text-gray-900 mb-4">Nový uživatel</h3>
+                      <input type="text" value={addOpForm.username} onChange={e => setAddOpForm(f => ({ ...f, username: e.target.value }))}
+                        placeholder="Uživatelské jméno (a-z, 0-9, . - _)"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
+                      <input type="password" value={addOpForm.password} onChange={e => setAddOpForm(f => ({ ...f, password: e.target.value }))}
+                        placeholder="Heslo (min. 6 znaků)"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
+                      <select value={addOpForm.role} onChange={e => setAddOpForm(f => ({ ...f, role: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]">
+                        <option value="operator">Operátor</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      {addOpError && <p className="text-red-500 text-sm mb-3">{addOpError}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={() => setAddOpModal(false)} className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600">Zrušit</button>
+                        <button onClick={addOperator} disabled={addOpSending}
+                          className="flex-1 py-2 rounded-xl bg-[#065A82] text-white text-sm font-medium disabled:opacity-60">
+                          {addOpSending ? "Ukládám…" : "Přidat"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Delete operator confirm */}
+                {deleteOpId && (
+                  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-2xl p-6 w-72 shadow-xl">
+                      <h3 className="font-semibold text-gray-900 mb-2">Smazat uživatele?</h3>
+                      <p className="text-sm text-gray-500 mb-4">Tato akce je nevratná. Uživatel bude odhlášen.</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => setDeleteOpId(null)} className="flex-1 py-2 rounded-xl border border-gray-200 text-sm">Zrušit</button>
+                        <button onClick={() => deleteOperator(deleteOpId)} className="flex-1 py-2 rounded-xl bg-red-600 text-white text-sm font-medium">Smazat</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Change password modal */}
+                {changePassModal && (
+                  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-2xl p-6 w-80 shadow-xl">
+                      <h3 className="font-semibold text-gray-900 mb-1">Změna hesla</h3>
+                      <p className="text-sm text-gray-500 mb-4">{changePassModal.username}</p>
+                      <input type="password" value={changePassValue} onChange={e => setChangePassValue(e.target.value)}
+                        placeholder="Nové heslo (min. 6 znaků)"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
+                      {changePassError && <p className="text-red-500 text-sm mb-3">{changePassError}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={() => setChangePassModal(null)} className="flex-1 py-2 rounded-xl border border-gray-200 text-sm">Zrušit</button>
+                        <button onClick={changePassword}
+                          className="flex-1 py-2 rounded-xl bg-[#065A82] text-white text-sm font-medium">
+                          Uložit
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

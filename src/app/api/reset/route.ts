@@ -5,8 +5,8 @@ import { requireOperator } from "@/lib/auth";
 
 // Testing only — deletes all driver data
 export async function DELETE(req: NextRequest) {
-  const denied = await requireOperator(req);
-  if (denied) return denied;
+  const auth = await requireOperator(req);
+  if ("denied" in auth) return auth.denied;
 
   if (req.nextUrl.searchParams.get("confirm") !== "yes") {
     return NextResponse.json({ error: "Add ?confirm=yes to proceed" }, { status: 400 });
