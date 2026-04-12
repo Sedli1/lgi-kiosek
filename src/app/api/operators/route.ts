@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { operators } from "@/db/schema";
+import { operators, auditLogs } from "@/db/schema";
 import { requireOperator } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { eq } from "drizzle-orm";
@@ -51,6 +51,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const [op] = await db.insert(operators).values({ username, passwordHash, role }).returning();
+    db.insert(auditLogs).values({
+      driverId: null, action: "user_created", ramp: null,
+      note: `Vytvořen: ${username} (${role})`, operatorName: auth.operator.username,
+    }).catch(() => {});
     return NextResponse.json({ id: op.id, username: op.username, role: op.role, createdAt: op.createdAt, active: op.active }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Uživatelské jméno je již obsazeno" }, { status: 409 });

@@ -15,6 +15,7 @@ interface Driver {
 }
 interface Ramp { id: number; name: string; status: string; note: string | null; }
 interface AuditLog { id: number; driverId: number | null; action: string; ramp: string | null; note: string | null; operatorName: string | null; createdAt: string; }
+interface AuditEntry extends AuditLog { driver: { name: string; spz: string; num: number } | null; }
 interface StatsData {
   perRamp: { ramp: string; count: number; avgMinutes: number | null }[];
   perFirm: { firm: string; count: number; avgMinutes: number | null }[];
@@ -32,7 +33,14 @@ type StatsPeriod = "today" | "week" | "month" | "all";
 // ── Constants ──────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, string> = { vyklada: "Vykládka", naklada: "Nakládka", obe: "Vykl.+Nakl." };
-const ACTION_LABELS: Record<string, string> = { created: "Registrace", ramp_assigned: "Rampa přidělena", done: "Dokončeno", note_added: "Poznámka", edited: "Úprava záznamu", cancelled: "Zrušeno operátorem" };
+const ACTION_LABELS: Record<string, string> = {
+  created: "Registrace", ramp_assigned: "Rampa přidělena", done: "Dokončeno",
+  note_added: "Poznámka", edited: "Úprava záznamu", cancelled: "Zrušeno",
+  login: "Přihlášení", logout: "Odhlášení",
+  user_created: "Nový uživatel", user_deleted: "Smazán uživatel",
+  role_changed: "Změna role", password_changed: "Změna hesla",
+  ramp_repair: "Stav rampy", data_reset: "Reset dat",
+};
 const PERIOD_LABELS: Record<StatsPeriod, string> = { today: "Dnes", week: "7 dní", month: "30 dní", all: "Vše" };
 
 // ── Helpers ────────────────────────────────────────────────
@@ -162,7 +170,7 @@ export default function OperatorPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [rampRows, setRampRows] = useState<Ramp[]>([]);
   const [auditData, setAuditData] = useState<AuditLog[]>([]);
-  const [tab, setTab] = useState<"active" | "history" | "stats" | "users">("active");
+  const [tab, setTab] = useState<"active" | "history" | "stats" | "users" | "audit">("active");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [operatorUsername, setOperatorUsername] = useState("");
@@ -211,6 +219,11 @@ export default function OperatorPage() {
   const [changePassModal, setChangePassModal] = useState<{id:number;username:string}|null>(null);
   const [changePassValue, setChangePassValue] = useState("");
   const [changePassError, setChangePassError] = useState("");
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditPeriod, setAuditPeriod] = useState<StatsPeriod>("today");
+  const [auditOpFilter, setAuditOpFilter] = useState("all");
+  const [auditActionFilter, setAuditActionFilter] = useState("all");
 
   // Zkontrolovat session cookie při načtení stránky
   useEffect(() => {
@@ -313,6 +326,21 @@ export default function OperatorPage() {
       .then((d: unknown) => { setOpList(d as typeof opList); setOpListLoading(false); })
       .catch(() => setOpListLoading(false));
   }, [tab, authed, operatorRole]);
+
+  // Načíst audit log
+  useEffect(() => {
+    if (tab !== "audit" || !authed || operatorRole !== "admin") return;
+    setAuditLoading(true);
+    const from = periodToFrom(auditPeriod);
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (auditOpFilter !== "all") qs.set("operator", auditOpFilter);
+    if (auditActionFilter !== "all") qs.set("action", auditActionFilter);
+    fetch(`/api/audit?${qs}`, { headers: authHeaders() })
+      .then(r => r.json())
+      .then((d: unknown) => { setAuditLog(d as AuditEntry[]); setAuditLoading(false); })
+      .catch(() => setAuditLoading(false));
+  }, [tab, authed, operatorRole, auditPeriod, auditOpFilter, auditActionFilter]);
 
   // Auto-login from URL ?pass= (pre-fill password field, still requires server auth)
   useEffect(() => {
@@ -594,6 +622,12 @@ export default function OperatorPage() {
                 <button onClick={() => setTab("users")}
                   className={`flex-1 py-2.5 text-sm font-medium transition flex items-center justify-center gap-1.5 ${tab==="users" ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
                   Uživatelé
+                </button>
+              )}
+              {operatorRole === "admin" && (
+                <button onClick={() => setTab("audit")}
+                  className={`flex-1 py-2.5 text-sm font-medium transition flex items-center justify-center gap-1.5 ${tab==="audit" ? "text-[#065A82] border-b-2 border-[#065A82] bg-blue-50" : "text-gray-500 hover:text-gray-700"}`}>
+                  Audit
                 </button>
               )}
             </div>
@@ -1166,6 +1200,83 @@ export default function OperatorPage() {
                 )}
               </div>
             )}
+
+            {/* Audit tab (admin only) */}
+            {tab === "audit" && operatorRole === "admin" && (() => {
+              const uniqueOps = [...new Set(auditLog.map(a => a.operatorName).filter(Boolean) as string[])].sort();
+              const actionColor = (action: string) => {
+                if (["login","logout"].includes(action)) return "bg-gray-100 text-gray-600";
+                if (action === "ramp_assigned") return "bg-green-50 text-green-700";
+                if (action === "done") return "bg-teal-50 text-teal-700";
+                if (action === "created") return "bg-blue-50 text-blue-700";
+                if (["cancelled","user_deleted","data_reset"].includes(action)) return "bg-red-50 text-red-600";
+                if (["user_created","role_changed","password_changed"].includes(action)) return "bg-purple-50 text-purple-700";
+                if (action === "ramp_repair") return "bg-amber-50 text-amber-700";
+                if (action === "edited") return "bg-indigo-50 text-indigo-700";
+                return "bg-gray-100 text-gray-500";
+              };
+              return (
+                <div className="p-4 flex flex-col gap-3 overflow-y-auto h-full">
+                  {/* Filters */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <div className="flex gap-1">
+                      {(["today","week","month","all"] as StatsPeriod[]).map(p => (
+                        <button key={p} onClick={() => setAuditPeriod(p)}
+                          className={`px-2.5 py-1 rounded text-xs font-medium border transition ${auditPeriod===p?"bg-[#065A82] text-white border-[#065A82]":"bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+                          {PERIOD_LABELS[p]}
+                        </button>
+                      ))}
+                    </div>
+                    <select value={auditOpFilter} onChange={e => setAuditOpFilter(e.target.value)}
+                      className="border border-gray-200 rounded px-2 py-1 text-xs bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#065A82]">
+                      <option value="all">Všichni operátoři</option>
+                      {uniqueOps.map(op => <option key={op} value={op}>{op}</option>)}
+                    </select>
+                    <select value={auditActionFilter} onChange={e => setAuditActionFilter(e.target.value)}
+                      className="border border-gray-200 rounded px-2 py-1 text-xs bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#065A82]">
+                      <option value="all">Všechny akce</option>
+                      {Object.entries(ACTION_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                    </select>
+                    <span className="text-xs text-gray-400 ml-auto">{auditLog.length} záznamů</span>
+                  </div>
+
+                  {/* Log list */}
+                  {auditLoading ? (
+                    <div className="text-gray-400 text-sm text-center py-8">Načítám…</div>
+                  ) : auditLog.length === 0 ? (
+                    <div className="text-gray-400 text-sm text-center py-8">Žádné záznamy</div>
+                  ) : (
+                    <div className="divide-y divide-gray-100 bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      {auditLog.map(entry => (
+                        <div key={entry.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50 text-sm">
+                          <div className="text-xs text-gray-400 whitespace-nowrap pt-0.5 w-24 flex-shrink-0">
+                            {fmtHistoryDate(entry.createdAt)}
+                          </div>
+                          <div className="w-20 flex-shrink-0 pt-0.5">
+                            <span className="text-xs font-medium text-gray-700 truncate block">{entry.operatorName ?? "—"}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${actionColor(entry.action)}`}>
+                                {ACTION_LABELS[entry.action] ?? entry.action}
+                              </span>
+                              {entry.driver && (
+                                <span className="text-xs text-gray-600">
+                                  #{entry.driver.num} {entry.driver.name} · {entry.driver.spz}
+                                </span>
+                              )}
+                            </div>
+                            {entry.note && (
+                              <div className="text-[11px] text-gray-400 mt-0.5 leading-tight">{entry.note}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 

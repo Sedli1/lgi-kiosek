@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/lib/db";
-import { sessions, authAttempts, operators } from "@/db/schema";
+import { sessions, authAttempts, operators, auditLogs } from "@/db/schema";
 import { eq, lt } from "drizzle-orm";
 import { hashPassword, verifyPassword } from "@/lib/password";
 
@@ -106,6 +106,12 @@ export async function POST(req: NextRequest) {
 
   db.delete(sessions).where(lt(sessions.expiresAt, new Date().toISOString())).catch(() => {});
 
+  // Audit log: přihlášení
+  db.insert(auditLogs).values({
+    driverId: null, action: "login", ramp: null,
+    note: null, operatorName: operatorRecord.username,
+  }).catch(() => {});
+
   const res = NextResponse.json({
     ok: true,
     operator: { id: operatorRecord.id, username: operatorRecord.username, role: operatorRecord.role },
@@ -119,6 +125,13 @@ export async function DELETE(req: NextRequest) {
   const token = req.cookies.get(COOKIE_NAME)?.value ?? "";
   if (token) {
     const db = await getDb();
+    const [session] = await db.select().from(sessions).where(eq(sessions.token, token));
+    if (session?.operatorUsername) {
+      db.insert(auditLogs).values({
+        driverId: null, action: "logout", ramp: null,
+        note: null, operatorName: session.operatorUsername,
+      }).catch(() => {});
+    }
     await db.delete(sessions).where(eq(sessions.token, token));
   }
   const res = NextResponse.json({ ok: true });

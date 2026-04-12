@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { operators, sessions } from "@/db/schema";
+import { operators, sessions, auditLogs } from "@/db/schema";
 import { requireOperator } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { eq, and, ne } from "drizzle-orm";
@@ -60,6 +60,21 @@ export async function PATCH(
   }
 
   const [updated] = await db.update(operators).set(updates).where(eq(operators.id, targetId)).returning();
+
+  // Audit log
+  if (updates.role !== undefined) {
+    db.insert(auditLogs).values({
+      driverId: null, action: "role_changed", ramp: null,
+      note: `${target.username}: ${target.role} → ${updates.role}`, operatorName: auth.operator.username,
+    }).catch(() => {});
+  }
+  if (updates.passwordHash !== undefined) {
+    db.insert(auditLogs).values({
+      driverId: null, action: "password_changed", ramp: null,
+      note: `Změna hesla: ${target.username}`, operatorName: auth.operator.username,
+    }).catch(() => {});
+  }
+
   return NextResponse.json({ id: updated.id, username: updated.username, role: updated.role });
 }
 
@@ -90,7 +105,13 @@ export async function DELETE(
     if (adminOps.length === 0) return NextResponse.json({ error: "Nelze smazat posledního admina" }, { status: 400 });
   }
 
-  // Invalidovat sessions
+  // Audit log před smazáním
+  db.insert(auditLogs).values({
+    driverId: null, action: "user_deleted", ramp: null,
+    note: `Smazán: ${target.username} (${target.role})`, operatorName: auth.operator.username,
+  }).catch(() => {});
+
+  // Invalidovat sessions a smazat
   await db.delete(sessions).where(eq(sessions.operatorId, targetId));
   await db.delete(operators).where(eq(operators.id, targetId));
 
