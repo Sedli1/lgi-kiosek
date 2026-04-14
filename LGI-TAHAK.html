@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>LGI Kiosek — Tahák</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #111;
+    padding: 18mm 16mm;
+    max-width: 210mm;
+    margin: auto;
+  }
+  h1 {
+    font-size: 17px;
+    font-weight: bold;
+    border-bottom: 2px solid #c00;
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+    color: #c00;
+    letter-spacing: 0.5px;
+  }
+  h2 {
+    font-size: 11px;
+    font-weight: bold;
+    background: #c00;
+    color: #fff;
+    padding: 3px 7px;
+    margin: 10px 0 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  h3 {
+    font-size: 10px;
+    font-weight: bold;
+    margin: 6px 0 2px;
+    color: #333;
+  }
+  .pitch {
+    background: #fff8f0;
+    border-left: 3px solid #c00;
+    padding: 6px 10px;
+    font-style: italic;
+    font-size: 11.5px;
+    margin-bottom: 4px;
+  }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  ul { padding-left: 14px; }
+  ul li { margin-bottom: 1px; }
+  .qa { margin-bottom: 5px; }
+  .qa .q { font-weight: bold; color: #555; }
+  .qa .a { padding-left: 10px; border-left: 2px solid #ddd; color: #333; margin-top: 1px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th { background: #eee; padding: 4px 6px; text-align: left; font-size: 10px; border: 1px solid #ccc; }
+  td { padding: 4px 6px; border: 1px solid #ccc; font-size: 10px; vertical-align: top; }
+  .badge {
+    background: #c00;
+    color: #fff;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
+  .zp {
+    background: #f0f7ff;
+    border: 1px solid #b0d0f0;
+    padding: 6px 10px;
+    margin-top: 8px;
+    font-size: 11px;
+  }
+  .zp strong { color: #c00; }
+  .roadmap-list { columns: 2; }
+  @media print {
+    body { padding: 10mm 12mm; }
+    @page { margin: 0; size: A4; }
+  }
+</style>
+</head>
+<body>
+
+<h1>LGI Kiosek &mdash; Tahák na schůzku</h1>
+
+<div class="pitch">
+  „Řidič přijede, vyplní tablet za 30 sekund, dostane SMS s rampou. Operátor vidí vše v reálném čase. Žádné telefonáty, žádný papír &mdash; a plný audit každé akce."
+</div>
+
+<div class="cols">
+  <div>
+    <h2>Co to umí dnes</h2>
+    <h3>Kiosek (řidič)</h3>
+    <ul>
+      <li>Registrace za 30 sekund (CZ / SK / PL / DE)</li>
+      <li>SMS při příjezdu + SMS s rampou a časem</li>
+      <li>Kontrola duplicit, validace SPZ</li>
+    </ul>
+    <h3>Operátor</h3>
+    <ul>
+      <li>Živý přehled čekajících, alarm &gt;30 min</li>
+      <li>Přidělení rampy → SMS odejde automaticky</li>
+      <li>Ruční přidání / úprava / zrušení řidiče</li>
+      <li>Stav ramp (dostupná / oprava)</li>
+    </ul>
+    <h3>Management / Admin</h3>
+    <ul>
+      <li>Statistiky, export CSV</li>
+      <li>Audit log — kdo co dělal, kdy</li>
+      <li>Správa operátorů, role, hesla</li>
+    </ul>
+  </div>
+  <div>
+    <h2>Argumenty pro IT</h2>
+    <ul>
+      <li><strong>Cloudflare</strong> — SLA 99,9 %, žádný vlastní server</li>
+      <li><strong>GitHub Actions</strong> — auto deploy, převzetí za půl dne</li>
+      <li><strong>Audit log</strong> — každá akce, compliance ready</li>
+      <li><strong>HTTPS + HttpOnly cookies + PBKDF2</strong> — bezpečnostní standardy</li>
+    </ul>
+
+    <h2>Roadmap</h2>
+    <ul class="roadmap-list">
+      <li>SSO / Active Directory</li>
+      <li>WhatsApp notifikace</li>
+      <li>Čtečka SPZ kamerou</li>
+      <li>Multilokace</li>
+      <li>API pro WMS/ERP</li>
+      <li>Denní reporty emailem</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Otázky které mohou padnout</h2>
+<div class="cols">
+  <div>
+    <div class="qa">
+      <div class="q">„Co když vypadne internet?"</div>
+      <div class="a">Tablet potřebuje připojení. Záloha: operátor přidá řidiče ručně.</div>
+    </div>
+    <div class="qa">
+      <div class="q">„Kdo to bude spravovat?"</div>
+      <div class="a">Vaše IT — nasazení za půl dne, automatické deploye přes GitHub.</div>
+    </div>
+    <div class="qa">
+      <div class="q">„Je to bezpečné?"</div>
+      <div class="a">HttpOnly cookies, PBKDF2 hesla, audit trail, HTTPS všude.</div>
+    </div>
+  </div>
+  <div>
+    <div class="qa">
+      <div class="q">„Půjde napojit na WMS/ERP?"</div>
+      <div class="a">Webhook/API je na roadmapě. Teď funguje standalone.</div>
+    </div>
+    <div class="qa">
+      <div class="q">„Co SSO / Active Directory?"</div>
+      <div class="a">Roadmap — Microsoft Entra SSO připraveno implementovat.</div>
+    </div>
+    <div class="qa">
+      <div class="q">„Kolik to stojí?"</div>
+      <div class="a">Viz tabulka níže.</div>
+    </div>
+  </div>
+</div>
+
+<h2>Varianty prodeje</h2>
+<table>
+  <tr>
+    <th>Varianta</th>
+    <th>Co dostanete</th>
+    <th>Cena</th>
+  </tr>
+  <tr>
+    <td><strong>A &mdash; Prodej kódu</strong></td>
+    <td>Zdrojový kód + dokumentace + zaškolení IT</td>
+    <td><strong>80–200 tis. CZK</strong> jednorázově</td>
+  </tr>
+  <tr>
+    <td><strong>B &mdash; Licence + podpora</strong></td>
+    <td>Kód váš, roční podpora + aktualizace</td>
+    <td><strong>30–60 tis. CZK/rok</strong></td>
+  </tr>
+  <tr>
+    <td><strong>C &mdash; SaaS</strong></td>
+    <td>Správa na naší straně, více poboček</td>
+    <td>dle počtu lokací</td>
+  </tr>
+</table>
+
+<div class="zp">
+  <strong>Zlaté pravidlo:</strong> Ukaž živou aplikaci &mdash; ne slajdy. Nech je zkusit registraci řidiče. Ukaž audit log. Nezavazuj se k termínům.
+</div>
+
+</body>
+</html>
