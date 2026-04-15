@@ -9,18 +9,16 @@ interface PlombaDriver {
   firm: string;
   spz: string;
   ramp: string | null;
-  vehicleType: string | null;
-  warehouseConfirmedAt: string | null;
   plombaType: string | null;
   plombaNum: string | null;
   plombaConfirmedAt: string | null;
+  warehouseConfirmedAt: string | null;
   verifyToken: string | null;
 }
 
 interface PlombaModal {
   driver: PlombaDriver;
-  type: "bezna" | "celni" | "";
-  num: string;
+  num: string;   // plomba number — pre-filled from system, editable
   sending: boolean;
 }
 
@@ -42,13 +40,20 @@ export default function PlombaPage() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15_000); // auto-refresh every 15s
+    const t = setInterval(load, 15_000);
     return () => clearInterval(t);
   }, [load]);
 
+  function openModal(d: PlombaDriver) {
+    setModal({ driver: d, num: d.plombaNum ?? "", sending: false });
+  }
+
   async function confirm() {
-    if (!modal || !modal.type) return;
-    if (modal.type === "celni" && !modal.num.trim()) return;
+    if (!modal) return;
+    const type = modal.driver.plombaType;
+    if (!type || type === "zadna") return;
+    if (type === "celni" && !modal.num.trim()) return;
+
     setModal(m => m ? { ...m, sending: true } : null);
 
     const res = await fetch(`/api/drivers/${modal.driver.id}/plomba`, {
@@ -56,7 +61,7 @@ export default function PlombaPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: modal.driver.verifyToken,
-        plombaType: modal.type,
+        plombaType: type,
         plombaNum: modal.num.trim() || undefined,
       }),
     });
@@ -92,36 +97,50 @@ export default function PlombaPage() {
           </div>
         )}
 
-        {awaiting.map(d => (
-          <div key={d.id} className="bg-white rounded-2xl shadow border-2 border-amber-300 p-4">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-[#065A82] text-white text-sm font-black px-2 py-0.5 rounded-lg">#{d.num}</span>
-                  <span className="font-bold text-gray-900">{d.name}</span>
+        {awaiting.map(d => {
+          const isCelni = d.plombaType === "celni";
+          return (
+            <div key={d.id} className={`bg-white rounded-2xl shadow border-2 p-4 ${isCelni ? "border-purple-400" : "border-amber-300"}`}>
+              {/* Ramp — biggest element */}
+              <div className={`rounded-xl px-4 py-3 mb-3 flex items-center justify-between ${isCelni ? "bg-purple-700" : "bg-[#065A82]"}`}>
+                <div className="text-white">
+                  <div className="text-xs uppercase tracking-widest opacity-70">Jděte na rampu</div>
+                  <div className="text-5xl font-black leading-none">{d.ramp ?? "—"}</div>
                 </div>
-                <div className="text-sm text-gray-500">{d.firm}</div>
+                <div className="text-right">
+                  <div className={`inline-flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-lg ${isCelni ? "bg-purple-500 text-white" : "bg-white/20 text-white"}`}>
+                    {isCelni ? "🛃 Celní" : "🔒 Běžná"}
+                  </div>
+                </div>
               </div>
-              <div className="text-right">
-                <div className="font-mono font-bold text-gray-900">{d.spz}</div>
-                {d.ramp && <div className="text-sm text-[#1D9E75] font-semibold">Rampa {d.ramp}</div>}
+
+              {/* Driver info */}
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="bg-gray-200 text-gray-700 text-xs font-black px-2 py-0.5 rounded-lg">#{d.num}</span>
+                    <span className="font-bold text-gray-900">{d.name}</span>
+                  </div>
+                  <div className="text-sm text-gray-500">{d.firm}</div>
+                </div>
+                <div className="font-mono font-bold text-gray-900 text-sm">{d.spz}</div>
               </div>
+
+              {d.warehouseConfirmedAt && (
+                <div className="text-xs text-gray-400 mb-3">
+                  Nakládka hotova: {new Date(d.warehouseConfirmedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              )}
+
+              <button
+                onClick={() => openModal(d)}
+                className={`w-full text-white font-bold py-3 rounded-xl transition text-sm ${isCelni ? "bg-purple-600 hover:bg-purple-500" : "bg-amber-500 hover:bg-amber-400"}`}
+              >
+                {isCelni ? "🛃 Zapsat celní plombu" : "🔒 Potvrdit plombu"}
+              </button>
             </div>
-
-            {d.warehouseConfirmedAt && (
-              <div className="text-xs text-gray-400 mb-3">
-                Nakládka hotova: {new Date(d.warehouseConfirmedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}
-              </div>
-            )}
-
-            <button
-              onClick={() => setModal({ driver: d, type: "", num: "", sending: false })}
-              className="w-full bg-amber-500 hover:bg-amber-400 text-white font-bold py-3 rounded-xl transition text-sm"
-            >
-              🔒 Zapsat plombu
-            </button>
-          </div>
-        ))}
+          );
+        })}
 
         {done.length > 0 && (
           <div className="mt-6">
@@ -132,10 +151,11 @@ export default function PlombaPage() {
                   <div>
                     <span className="font-medium text-gray-900">{d.spz}</span>
                     <span className="text-gray-400 text-sm ml-2">{d.firm}</span>
+                    {d.ramp && <span className="text-gray-400 text-sm ml-2">· Rampa {d.ramp}</span>}
                   </div>
                   <div className="text-right text-sm">
                     <div className={`font-medium ${d.plombaType === "celni" ? "text-purple-600" : "text-green-600"}`}>
-                      {d.plombaType === "celni" ? `Celní č. ${d.plombaNum}` : "Běžná"}
+                      {d.plombaType === "celni" ? `Celní ${d.plombaNum ? `č. ${d.plombaNum}` : ""}` : "Běžná"}
                     </div>
                     {d.plombaConfirmedAt && (
                       <div className="text-gray-400 text-xs">
@@ -151,60 +171,65 @@ export default function PlombaPage() {
       </main>
 
       {/* Modal */}
-      {modal && (
-        <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50 p-0">
-          <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 pb-8">
-            <div className="text-center mb-1">
-              <div className="text-2xl font-black text-gray-900">Typ plomby</div>
-              <div className="text-gray-500 text-sm">{modal.driver.spz} · Rampa {modal.driver.ramp}</div>
-            </div>
+      {modal && (() => {
+        const d = modal.driver;
+        const isCelni = d.plombaType === "celni";
+        const canConfirm = !isCelni || modal.num.trim().length > 0;
 
-            <div className="grid grid-cols-2 gap-3 my-5">
-              <button
-                onClick={() => setModal(m => m ? { ...m, type: "bezna", num: "" } : null)}
-                className={`py-5 rounded-2xl border-2 font-bold text-lg transition ${modal.type === "bezna" ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-700 border-gray-200 hover:border-green-400"}`}
-              >
-                🔒<br /><span className="text-sm">Běžná</span>
-              </button>
-              <button
-                onClick={() => setModal(m => m ? { ...m, type: "celni" } : null)}
-                className={`py-5 rounded-2xl border-2 font-bold text-lg transition ${modal.type === "celni" ? "bg-purple-600 text-white border-purple-600" : "bg-white text-gray-700 border-gray-200 hover:border-purple-400"}`}
-              >
-                🛃<br /><span className="text-sm">Celní</span>
-              </button>
-            </div>
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50">
+            <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 pb-8">
 
-            {modal.type === "celni" && (
-              <div className="mb-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Číslo celní plomby *</label>
-                <input
-                  value={modal.num}
-                  onChange={e => setModal(m => m ? { ...m, num: e.target.value } : null)}
-                  placeholder="např. CZ12345678"
-                  className="w-full border-2 border-purple-300 rounded-xl px-4 py-3 text-lg font-mono focus:outline-none focus:border-purple-500"
-                  autoFocus
-                />
+              {/* Destination */}
+              <div className={`rounded-2xl px-5 py-4 mb-5 text-center ${isCelni ? "bg-purple-700" : "bg-[#065A82]"}`}>
+                <div className="text-white/70 text-xs uppercase tracking-widest mb-1">Jděte na rampu</div>
+                <div className="text-white text-7xl font-black leading-none">{d.ramp ?? "—"}</div>
+                <div className="text-white/80 text-sm mt-1">{d.spz} · {d.name}</div>
               </div>
-            )}
 
-            <div className="flex gap-3">
-              <button
-                onClick={() => setModal(null)}
-                className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium"
-              >
-                Zrušit
-              </button>
-              <button
-                onClick={confirm}
-                disabled={!modal.type || (modal.type === "celni" && !modal.num.trim()) || modal.sending}
-                className="flex-1 bg-[#065A82] text-white py-3 rounded-xl font-bold disabled:opacity-40"
-              >
-                {modal.sending ? "Ukládám…" : "Potvrdit plombu"}
-              </button>
+              {/* Type badge */}
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <span className={`text-sm font-bold px-4 py-2 rounded-full ${isCelni ? "bg-purple-100 text-purple-700" : "bg-green-100 text-green-700"}`}>
+                  {isCelni ? "🛃 Celní plomba" : "🔒 Běžná plomba"}
+                </span>
+              </div>
+
+              {/* Plomba number */}
+              {isCelni && (
+                <div className="mb-5">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                    Číslo celní plomby
+                    {d.plombaNum && <span className="ml-2 text-xs font-normal text-gray-400">(přednastaveno operátorem)</span>}
+                  </label>
+                  <input
+                    value={modal.num}
+                    onChange={e => setModal(m => m ? { ...m, num: e.target.value } : null)}
+                    placeholder="např. CZ12345678"
+                    className="w-full border-2 border-purple-300 rounded-xl px-4 py-3 text-xl font-mono font-bold tracking-widest focus:outline-none focus:border-purple-500"
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setModal(null)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium"
+                >
+                  Zrušit
+                </button>
+                <button
+                  onClick={confirm}
+                  disabled={!canConfirm || modal.sending}
+                  className={`flex-1 text-white py-3 rounded-xl font-bold disabled:opacity-40 ${isCelni ? "bg-purple-600 hover:bg-purple-500" : "bg-green-600 hover:bg-green-500"}`}
+                >
+                  {modal.sending ? "Ukládám…" : "✓ Potvrdit plombu"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
