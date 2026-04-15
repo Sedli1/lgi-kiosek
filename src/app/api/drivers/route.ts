@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json()) as Record<string, string>;
-  const { name, phone, spz, firm, order, type, lang } = body;
+  const { name, phone, spz, spzTrailer, firm, order, type, lang, vehicleType } = body;
 
   // Presence check
   if (!name || !phone || !spz || !firm || !type || !lang) {
@@ -93,9 +93,23 @@ export async function POST(req: NextRequest) {
   const count = await db.$count(drivers);
   const num = count + 1;
 
+  const verifyToken = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+
   const [driver] = await db
     .insert(drivers)
-    .values({ num, name: sanitize(name), phone: sanitize(phone), spz: cleanSpz, firm: sanitize(firm), order: order ? sanitize(order) || null : null, type, lang })
+    .values({
+      num,
+      name: sanitize(name),
+      phone: sanitize(phone),
+      spz: cleanSpz,
+      spzTrailer: spzTrailer ? sanitize(spzTrailer).toUpperCase() : null,
+      firm: sanitize(firm),
+      order: order ? sanitize(order) || null : null,
+      type,
+      lang,
+      vehicleType: vehicleType || null,
+      verifyToken,
+    })
     .returning();
 
   // Write audit log

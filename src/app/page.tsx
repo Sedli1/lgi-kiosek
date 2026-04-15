@@ -1,12 +1,22 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { T, Lang } from "@/lib/i18n";
 
 // ── Types ─────────────────────────────────────────────────
 
-interface ConfirmData { num: number; confirmSms: string; }
+interface ConfirmData { num: number; confirmSms: string; driverId: number; }
 type FormField = "name" | "phone" | "spz" | "firm" | "order";
+
+const VEHICLE_TYPES = [
+  { value: "tahac_navis", label: "Tahač + návěs", emoji: "🚛" },
+  { value: "tahac",       label: "Tahač solo",    emoji: "🚚" },
+  { value: "dodavka_privěs", label: "Dodávka + přívěs", emoji: "🚐" },
+  { value: "dodavka",    label: "Dodávka",        emoji: "🚌" },
+  { value: "dodavka_plachta", label: "Plachta",   emoji: "🚜" },
+  { value: "jine",       label: "Jiné",           emoji: "🚗" },
+] as const;
 type FormValues = Record<FormField, string>;
 const RESET_SECONDS = 90;
 const OFFLINE_QUEUE_KEY = "lgi-offline-queue";
@@ -75,12 +85,15 @@ function validateField(field: FormField, value: string): string | null {
 // ── Main component ────────────────────────────────────────
 
 export default function KioskPage() {
+  const router = useRouter();
   const [lang, setLang] = useState<Lang | null>(null);
   const [confirmed, setConfirmed] = useState<ConfirmData | null>(null);
   const [loading, setLoading] = useState(false);
   const [values, setValues] = useState<FormValues>({ name: "", phone: "", spz: "", firm: "", order: "" });
+  const [spzTrailer, setSpzTrailer] = useState("");
   const [dialCode, setDialCode] = useState("+420");
   const [typeValue, setTypeValue] = useState("");
+  const [vehicleType, setVehicleType] = useState("");
   const [touched, setTouched] = useState<Set<FormField>>(new Set());
   const [countdown, setCountdown] = useState(RESET_SECONDS);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -139,7 +152,9 @@ export default function KioskPage() {
     setConfirmed(null);
     setLang(null);
     setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
+    setSpzTrailer("");
     setTypeValue("");
+    setVehicleType("");
     setTouched(new Set());
   }
 
@@ -176,25 +191,27 @@ export default function KioskPage() {
     setLoading(true);
 
     const phone = values.phone.startsWith("+") ? values.phone : `${dialCode}${values.phone}`;
-    const payload = { name: values.name.trim(), phone, spz: values.spz.trim(), firm: values.firm.trim(), order: values.order.trim(), type: typeValue, lang };
+    const payload = { name: values.name.trim(), phone, spz: values.spz.trim(), spzTrailer: spzTrailer.trim() || undefined, firm: values.firm.trim(), order: values.order.trim(), type: typeValue, lang, vehicleType: vehicleType || undefined };
 
     if (!navigator.onLine) {
       const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) ?? "[]");
       queue.push(payload);
       localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
       setLoading(false);
-      setConfirmed({ num: 0, confirmSms: "Registrace uložena offline. Bude odeslaná po obnovení připojení." });
+      setConfirmed({ num: 0, confirmSms: "Registrace uložena offline. Bude odeslaná po obnovení připojení.", driverId: 0 });
       return;
     }
 
     try {
       const res = await fetch("/api/drivers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (res.ok) {
-        const data = (await res.json()) as { num: number; confirmSms: string };
+        const data = (await res.json()) as { id: number; num: number; confirmSms: string };
         setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
+        setSpzTrailer("");
         setTypeValue("");
+        setVehicleType("");
         setTouched(new Set());
-        setConfirmed({ num: data.num, confirmSms: data.confirmSms });
+        setConfirmed({ num: data.num, confirmSms: data.confirmSms, driverId: data.id });
       }
     } finally {
       setLoading(false);
@@ -299,6 +316,15 @@ export default function KioskPage() {
             <p className="text-sm text-gray-400">Automatický reset</p>
           </div>
 
+          {confirmed.driverId > 0 && (
+            <button
+              onClick={() => router.push(`/print/${confirmed.driverId}`)}
+              className="w-full bg-[#065A82] text-white font-bold py-4 rounded-2xl text-lg mb-3 flex items-center justify-center gap-2 hover:bg-blue-800 transition"
+            >
+              🖨 Vytisknout štítek
+            </button>
+          )}
+
           <button onClick={resetAll} className="text-[#065A82] underline text-sm">
             ← Nová registrace ihned
           </button>
@@ -382,6 +408,30 @@ export default function KioskPage() {
             )}
           </div>
 
+          {/* Vehicle type */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Typ vozidla
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {VEHICLE_TYPES.map((vt) => (
+                <button
+                  key={vt.value}
+                  type="button"
+                  onClick={() => setVehicleType(vt.value)}
+                  className={`py-3 px-2 rounded-xl border-2 transition active:scale-95 flex flex-col items-center gap-1 ${
+                    vehicleType === vt.value
+                      ? "bg-[#065A82] text-white border-[#065A82] shadow-md"
+                      : "bg-white text-gray-700 border-gray-200 hover:border-[#065A82]"
+                  }`}
+                >
+                  <span className="text-2xl">{vt.emoji}</span>
+                  <span className="text-xs font-medium leading-tight text-center">{vt.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Name */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">
@@ -436,7 +486,7 @@ export default function KioskPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">
-                {t.spz} <span className="text-red-500">*</span>
+                {t.spz} (tahač) <span className="text-red-500">*</span>
               </label>
               <input
                 name="spz"
@@ -452,19 +502,36 @@ export default function KioskPage() {
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">
-                {t.firm} <span className="text-red-500">*</span>
+                SPZ přívěs / návěs
               </label>
               <input
-                name="firm"
-                autoComplete="organization"
-                maxLength={100}
-                value={values.firm}
-                placeholder="Dopravní firma s.r.o."
-                onChange={(e) => handleInputChange("firm", e.target.value)}
-                className={inputClass("firm")}
+                name="spzTrailer"
+                autoComplete="off"
+                maxLength={15}
+                value={spzTrailer}
+                placeholder="AB 1234"
+                onChange={(e) => setSpzTrailer(e.target.value.toUpperCase())}
+                className="w-full border-2 rounded-xl px-4 py-4 text-lg focus:outline-none transition-colors placeholder:text-gray-400 border-gray-200 focus:border-[#065A82]"
+                style={{ textTransform: "uppercase" }}
               />
-              {fieldState("firm") === "err" && <p className="text-red-500 text-xs mt-1">{t.required}</p>}
             </div>
+          </div>
+
+          {/* Firm */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              {t.firm} <span className="text-red-500">*</span>
+            </label>
+            <input
+              name="firm"
+              autoComplete="organization"
+              maxLength={100}
+              value={values.firm}
+              placeholder="Dopravní firma s.r.o."
+              onChange={(e) => handleInputChange("firm", e.target.value)}
+              className={inputClass("firm")}
+            />
+            {fieldState("firm") === "err" && <p className="text-red-500 text-xs mt-1">{t.required}</p>}
           </div>
 
           {/* Order (optional) */}
