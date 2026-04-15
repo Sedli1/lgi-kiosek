@@ -14,8 +14,8 @@ export async function PATCH(
 
   const { id } = await params;
   const operatorName = auth.operator.username;
-  const body = (await req.json()) as { ramp: string; rampTime?: string; skipSms?: boolean };
-  const { ramp, rampTime: operatorTime, skipSms } = body;
+  const body = (await req.json()) as { ramp: string; rampTime?: string; skipSms?: boolean; palletCount?: number };
+  const { ramp, rampTime: operatorTime, skipSms, palletCount } = body;
 
   if (!ramp || !/^\d{1,2}$/.test(String(ramp))) {
     return NextResponse.json({ error: "Invalid ramp" }, { status: 400 });
@@ -35,7 +35,7 @@ export async function PATCH(
 
   const [updated] = await db
     .update(drivers)
-    .set({ ramp: String(ramp), rampTime, rampAssignedAt, status: "ramp" })
+    .set({ ramp: String(ramp), rampTime, rampAssignedAt, status: "ramp", ...(palletCount ? { palletCount } : {}) })
     .where(eq(drivers.id, Number(id)))
     .returning();
 

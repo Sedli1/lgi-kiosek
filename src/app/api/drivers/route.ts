@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json()) as Record<string, string>;
-  const { name, phone, spz, spzTrailer, firm, order, type, lang, vehicleType } = body;
+  const { name, phone, spz, spzTrailer, firm, order, type, lang, vehicleType, palletArrangement, palletGrid } = body;
 
   // Presence check
   if (!name || !phone || !spz || !firm || !type || !lang) {
@@ -108,6 +108,8 @@ export async function POST(req: NextRequest) {
       type,
       lang,
       vehicleType: vehicleType || null,
+      palletArrangement: palletArrangement || null,
+      palletGrid: palletGrid || null,
       verifyToken,
     })
     .returning();

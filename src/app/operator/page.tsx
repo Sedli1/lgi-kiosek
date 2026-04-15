@@ -182,6 +182,7 @@ export default function OperatorPage() {
   const [rampModal, setRampModal] = useState<Driver | null>(null);
   const [selectedRamp, setSelectedRamp] = useState("1");
   const [selectedTime, setSelectedTime] = useState(nowTime());
+  const [selectedPalletCount, setSelectedPalletCount] = useState("");
   const [rampConflict, setRampConflict] = useState<Driver | null>(null);
   const [sending, setSending] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -439,11 +440,12 @@ export default function OperatorPage() {
   async function assignRamp() {
     if (!rampModal) return;
     setSending(true);
+    const palletCount = selectedPalletCount ? Number(selectedPalletCount) : undefined;
     await fetch(`/api/drivers/${rampModal.id}/ramp`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime, skipSms }),
+      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime, skipSms, palletCount }),
     });
-    setSending(false); setRampModal(null); setRampConflict(null); setSkipSms(false);
+    setSending(false); setRampModal(null); setRampConflict(null); setSkipSms(false); setSelectedPalletCount("");
   }
 
   async function cancelDriver(id: number) {
@@ -1528,8 +1530,8 @@ export default function OperatorPage() {
             <h3 className="text-lg font-bold mb-1">Přidělit rampu</h3>
             <p className="text-gray-500 text-sm mb-4">{rampModal.name} · {rampModal.spz} · {TYPE_LABELS[rampModal.type]??rampModal.type}</p>
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Číslo rampy</label>
                 <div className="flex gap-1.5 flex-wrap">
                   {[...rampRows].sort((a, b) => Number(a.name) - Number(b.name)).map(r => {
@@ -1552,6 +1554,13 @@ export default function OperatorPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Čas příjezdu</label>
                 <input type="time" value={selectedTime} onChange={e => setSelectedTime(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-[#065A82]"/>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Počet palet</label>
+                <input type="number" min="1" max="99" value={selectedPalletCount}
+                  onChange={e => setSelectedPalletCount(e.target.value)}
+                  placeholder="—"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-[#065A82]"/>
               </div>
             </div>
