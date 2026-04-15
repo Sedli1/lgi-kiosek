@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { T, Lang } from "@/lib/i18n";
-import { TruckDiagram, type ZoneId } from "@/components/TruckDiagram";
+import { TruckDiagram, emptyGrid, type GridState } from "@/components/TruckDiagram";
+import { VehicleIcon } from "@/components/VehicleIcon";
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -11,12 +12,12 @@ interface ConfirmData { num: number; confirmSms: string; driverId: number; }
 type FormField = "name" | "phone" | "spz" | "firm" | "order";
 
 const VEHICLE_TYPES = [
-  { value: "tahac_navis", label: "Tahač + návěs", emoji: "🚛" },
-  { value: "tahac",       label: "Tahač solo",    emoji: "🚚" },
-  { value: "dodavka_privěs", label: "Dodávka + přívěs", emoji: "🚐" },
-  { value: "dodavka",    label: "Dodávka",        emoji: "🚌" },
-  { value: "dodavka_plachta", label: "Plachta",   emoji: "🚜" },
-  { value: "jine",       label: "Jiné",           emoji: "🚗" },
+  { value: "tahac_navis",    label: "Tahač + návěs"    },
+  { value: "tahac",          label: "Tahač solo"        },
+  { value: "dodavka_privěs", label: "Dodávka + přívěs" },
+  { value: "dodavka",        label: "Dodávka"           },
+  { value: "dodavka_plachta",label: "Plachta"           },
+  { value: "jine",           label: "Jiné"              },
 ] as const;
 type FormValues = Record<FormField, string>;
 const RESET_SECONDS = 90;
@@ -95,7 +96,7 @@ export default function KioskPage() {
   const [dialCode, setDialCode] = useState("+420");
   const [typeValue, setTypeValue] = useState("");
   const [vehicleType, setVehicleType] = useState("");
-  const [palletZones, setPalletZones] = useState<ZoneId[]>([]);
+  const [palletGrid, setPalletGrid] = useState<GridState>(emptyGrid());
   const [touched, setTouched] = useState<Set<FormField>>(new Set());
   const [countdown, setCountdown] = useState(RESET_SECONDS);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -157,7 +158,7 @@ export default function KioskPage() {
     setSpzTrailer("");
     setTypeValue("");
     setVehicleType("");
-    setPalletZones([]);
+    setPalletGrid(emptyGrid());
     setTouched(new Set());
   }
 
@@ -194,7 +195,7 @@ export default function KioskPage() {
     setLoading(true);
 
     const phone = values.phone.startsWith("+") ? values.phone : `${dialCode}${values.phone}`;
-    const palletArrangement = palletZones.length > 0 ? JSON.stringify(palletZones) : undefined;
+    const palletArrangement = palletGrid.some(c => c === 1) ? JSON.stringify(palletGrid) : undefined;
     const payload = { name: values.name.trim(), phone, spz: values.spz.trim(), spzTrailer: spzTrailer.trim() || undefined, firm: values.firm.trim(), order: values.order.trim(), type: typeValue, lang, vehicleType: vehicleType || undefined, palletArrangement };
 
     if (!navigator.onLine) {
@@ -214,6 +215,7 @@ export default function KioskPage() {
         setSpzTrailer("");
         setTypeValue("");
         setVehicleType("");
+        setPalletGrid(emptyGrid());
         setTouched(new Set());
         setConfirmed({ num: data.num, confirmSms: data.confirmSms, driverId: data.id });
       }
@@ -418,21 +420,28 @@ export default function KioskPage() {
               Typ vozidla
             </label>
             <div className="grid grid-cols-3 gap-2">
-              {VEHICLE_TYPES.map((vt) => (
-                <button
-                  key={vt.value}
-                  type="button"
-                  onClick={() => setVehicleType(vt.value)}
-                  className={`py-3 px-2 rounded-xl border-2 transition active:scale-95 flex flex-col items-center gap-1 ${
-                    vehicleType === vt.value
-                      ? "bg-[#065A82] text-white border-[#065A82] shadow-md"
-                      : "bg-white text-gray-700 border-gray-200 hover:border-[#065A82]"
-                  }`}
-                >
-                  <span className="text-2xl">{vt.emoji}</span>
-                  <span className="text-xs font-medium leading-tight text-center">{vt.label}</span>
-                </button>
-              ))}
+              {VEHICLE_TYPES.map((vt) => {
+                const selected = vehicleType === vt.value;
+                return (
+                  <button
+                    key={vt.value}
+                    type="button"
+                    onClick={() => setVehicleType(vt.value)}
+                    className={`py-3 px-2 rounded-xl border-2 transition active:scale-95 flex flex-col items-center gap-1.5 ${
+                      selected
+                        ? "bg-[#065A82] border-[#065A82] shadow-md"
+                        : "bg-white text-gray-700 border-gray-200 hover:border-[#065A82]"
+                    }`}
+                  >
+                    <div style={selected ? { filter: "brightness(0) invert(1)" } : undefined}>
+                      <VehicleIcon type={vt.value} size={52} />
+                    </div>
+                    <span className={`text-xs font-medium leading-tight text-center ${selected ? "text-white" : "text-gray-700"}`}>
+                      {vt.label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -559,8 +568,8 @@ export default function KioskPage() {
                 Kde chcete umístit náklad?
               </label>
               <p className="text-xs text-gray-400 mb-3">Klepněte na zónu v kamionu (lze vybrat více)</p>
-              <TruckDiagram zones={palletZones} onChange={setPalletZones} />
-              {palletZones.length === 0 && (
+              <TruckDiagram grid={palletGrid} onChange={setPalletGrid} />
+              {palletGrid.every(c => c === 0) && (
                 <p className="text-xs text-center text-gray-400 mt-2">Nevybráno — skladník rozhodne sám</p>
               )}
             </div>

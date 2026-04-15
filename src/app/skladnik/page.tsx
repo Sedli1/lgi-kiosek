@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { TruckDiagram, type ZoneId } from "@/components/TruckDiagram";
+import { TruckDiagram, type GridState } from "@/components/TruckDiagram";
 
 interface DriverInfo {
   id: number;
@@ -244,9 +244,9 @@ export default function SkladnikPage() {
 
             {/* Pallet arrangement */}
             {driver.palletArrangement && (() => {
-              let zones: ZoneId[] = [];
-              try { zones = JSON.parse(driver.palletArrangement) as ZoneId[]; } catch {}
-              if (zones.length === 0) return null;
+              let grid: GridState = [];
+              try { grid = JSON.parse(driver.palletArrangement) as GridState; } catch {}
+              if (!grid.some(c => c === 1)) return null;
               return (
                 <div className="mb-4 pt-4 border-t border-gray-700">
                   <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">
@@ -254,7 +254,7 @@ export default function SkladnikPage() {
                     {driver.palletCount && <span className="ml-2 text-amber-400">({driver.palletCount} pal.)</span>}
                   </div>
                   <div className="bg-gray-800 rounded-xl p-3">
-                    <TruckDiagram zones={zones} readonly compact />
+                    <TruckDiagram grid={grid} readonly compact />
                   </div>
                 </div>
               );

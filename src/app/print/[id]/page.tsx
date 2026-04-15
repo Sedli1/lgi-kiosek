@@ -44,12 +44,15 @@ export default function PrintPage() {
   useEffect(() => {
     if (!driver?.verifyToken || !canvasRef.current) return;
 
-    // Generate QR code using qrcode library
+    // Generate QR code then auto-print
     import("qrcode").then((QRCode) => {
       QRCode.toCanvas(canvasRef.current!, driver.verifyToken, {
         width: 200,
         margin: 2,
         color: { dark: "#000000", light: "#ffffff" },
+      }).then(() => {
+        // Short delay so the browser paints before print dialog opens
+        setTimeout(() => window.print(), 300);
       });
     });
   }, [driver]);

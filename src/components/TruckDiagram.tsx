@@ -1,153 +1,144 @@
 "use client";
 
-// Zone IDs: "A" = near doors (rear), "B" = middle, "C" = near cab (front)
-export const TRUCK_ZONES = [
-  { id: "A", label: "Dveře",  sublabel: "Nakládá se první", color: "#22c55e", textColor: "#fff" },
-  { id: "B", label: "Střed",  sublabel: "Uprostřed",        color: "#f59e0b", textColor: "#fff" },
-  { id: "C", label: "Kabina", sublabel: "Nakládá se poslední", color: "#3b82f6", textColor: "#fff" },
-] as const;
+// 11 columns (length) × 2 rows (width) = 22 pallet positions
+// Columns: 0 = near doors (rear), 10 = near cab (front)
+const COLS = 11;
+const ROWS = 2;
 
-export type ZoneId = "A" | "B" | "C";
+export type CellState = 0 | 1; // 0=empty, 1=selected
+export type GridState = CellState[]; // length = COLS * ROWS
+
+export function emptyGrid(): GridState {
+  return Array(COLS * ROWS).fill(0) as GridState;
+}
 
 interface TruckDiagramProps {
-  zones: ZoneId[];
-  onChange?: (zones: ZoneId[]) => void;
+  grid: GridState;
+  onChange?: (grid: GridState) => void;
   readonly?: boolean;
   compact?: boolean;
 }
 
-export function TruckDiagram({ zones, onChange, readonly = false, compact = false }: TruckDiagramProps) {
-  function toggle(id: ZoneId) {
+export function TruckDiagram({ grid, onChange, readonly = false, compact = false }: TruckDiagramProps) {
+  function toggle(idx: number) {
     if (readonly || !onChange) return;
-    if (zones.includes(id)) onChange(zones.filter(z => z !== id));
-    else onChange([...zones, id]);
+    const next = [...grid] as GridState;
+    next[idx] = next[idx] === 0 ? 1 : 0;
+    onChange(next);
   }
 
-  const W = 480, H = compact ? 140 : 180;
-  const BODY_X = 30, BODY_W = 340, BODY_H = compact ? 100 : 130;
-  const BODY_Y = (H - BODY_H) / 2;
-  const ZONE_W = BODY_W / 3;
-  const CAB_X = BODY_X + BODY_W + 4;
-  const CAB_W = 70, CAB_H = compact ? 80 : 100;
-  const CAB_Y = (H - CAB_H) / 2;
-  const WH = compact ? 10 : 13, WW = compact ? 22 : 28; // wheel dims
+  const CELL_W = compact ? 28 : 36;
+  const CELL_H = compact ? 22 : 28;
+  const GAP = 2;
+  const PAD = 6;
+  const CAB_W = compact ? 32 : 40;
+  const CAB_H = compact ? 54 : 68;
+  const DOOR_W = compact ? 10 : 13;
 
-  // Wheel positions [x, y]
-  const wheels = [
-    [BODY_X + 20, BODY_Y - WH],
-    [BODY_X + BODY_W - 20 - WW, BODY_Y - WH],
-    [BODY_X + 20, BODY_Y + BODY_H],
-    [BODY_X + BODY_W - 20 - WW, BODY_Y + BODY_H],
-    [CAB_X + 10, CAB_Y + CAB_H - WH * 2 - 2],
-  ];
+  const bodyW = COLS * (CELL_W + GAP) - GAP + PAD * 2;
+  const bodyH = ROWS * (CELL_H + GAP) - GAP + PAD * 2;
+  const totalW = DOOR_W + bodyW + CAB_W + 8;
+  const totalH = bodyH + 28; // extra for wheels + labels
+
+  const bodyX = DOOR_W;
+  const bodyY = 20;
+  const cabX = bodyX + bodyW + 4;
+  const cabY = bodyY + (bodyH - CAB_H) / 2;
+
+  // wheel x positions
+  const wY1 = bodyY - 8;
+  const wY2 = bodyY + bodyH;
+  const wW = CELL_W * 1.5, wH = 7;
+
+  const selectedCount = grid.filter(c => c === 1).length;
 
   return (
-    <div className={compact ? "" : "select-none"}>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: compact ? 120 : 160 }}>
-        {/* Cargo body outline */}
-        <rect x={BODY_X} y={BODY_Y} width={BODY_W} height={BODY_H}
-          fill="#f3f4f6" stroke="#374151" strokeWidth="3" rx="3" />
+    <div className="select-none">
+      <svg
+        viewBox={`0 0 ${totalW} ${totalH}`}
+        className="w-full"
+        style={{ maxHeight: compact ? 110 : 140 }}
+      >
+        {/* Cargo body */}
+        <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH}
+          fill="#f9fafb" stroke="#374151" strokeWidth="2.5" rx="2" />
 
-        {/* Clickable zones */}
-        {TRUCK_ZONES.map((zone, i) => {
-          const x = BODY_X + i * ZONE_W;
-          const selected = zones.includes(zone.id);
-          return (
-            <g key={zone.id} onClick={() => toggle(zone.id)}
-              style={{ cursor: readonly ? "default" : "pointer" }}>
-              <rect x={x} y={BODY_Y} width={ZONE_W} height={BODY_H}
-                fill={selected ? zone.color : "#e5e7eb"}
-                opacity={selected ? 0.85 : 0.5}
-                stroke="#374151" strokeWidth="1.5" />
-              {/* Zone label */}
-              <text x={x + ZONE_W / 2} y={BODY_Y + BODY_H / 2 - (compact ? 6 : 10)}
-                textAnchor="middle" fontSize={compact ? 12 : 14}
-                fontWeight="bold" fill={selected ? "#fff" : "#6b7280"}>
-                {zone.label}
-              </text>
-              {!compact && (
-                <text x={x + ZONE_W / 2} y={BODY_Y + BODY_H / 2 + 10}
-                  textAnchor="middle" fontSize={10} fill={selected ? "#e5e7eb" : "#9ca3af"}>
-                  {zone.sublabel}
-                </text>
-              )}
-              {/* Checkmark if selected */}
-              {selected && (
-                <text x={x + ZONE_W / 2} y={BODY_Y + BODY_H - (compact ? 8 : 14)}
-                  textAnchor="middle" fontSize={compact ? 14 : 18} fill="#fff">
-                  ✓
-                </text>
-              )}
-            </g>
-          );
-        })}
+        {/* Pallet cells */}
+        {Array.from({ length: ROWS }, (_, row) =>
+          Array.from({ length: COLS }, (_, col) => {
+            const idx = row * COLS + col;
+            const sel = grid[idx] === 1;
+            const cx = bodyX + PAD + col * (CELL_W + GAP);
+            const cy = bodyY + PAD + row * (CELL_H + GAP);
+            return (
+              <g key={idx} onClick={() => toggle(idx)} style={{ cursor: readonly ? "default" : "pointer" }}>
+                <rect x={cx} y={cy} width={CELL_W} height={CELL_H}
+                  fill={sel ? "#22c55e" : "#e5e7eb"}
+                  stroke={sel ? "#16a34a" : "#d1d5db"}
+                  strokeWidth="1" rx="2" />
+                {sel && (
+                  <text x={cx + CELL_W / 2} y={cy + CELL_H / 2 + 4}
+                    textAnchor="middle" fontSize={compact ? 9 : 11} fontWeight="bold" fill="#fff">✓</text>
+                )}
+              </g>
+            );
+          })
+        )}
 
-        {/* Zone dividers */}
-        <line x1={BODY_X + ZONE_W} y1={BODY_Y} x2={BODY_X + ZONE_W} y2={BODY_Y + BODY_H}
-          stroke="#374151" strokeWidth="2" />
-        <line x1={BODY_X + ZONE_W * 2} y1={BODY_Y} x2={BODY_X + ZONE_W * 2} y2={BODY_Y + BODY_H}
-          stroke="#374151" strokeWidth="2" />
-
-        {/* Doors on left */}
-        <rect x={BODY_X - 8} y={BODY_Y + 4} width={8} height={BODY_H - 8}
-          fill="#374151" rx="2" />
-        {/* Door handle */}
-        <rect x={BODY_X - 6} y={BODY_Y + BODY_H / 2 - 8} width={4} height={16}
-          fill="#9ca3af" rx="1" />
-        {/* Door split line */}
-        <line x1={BODY_X - 8} y1={BODY_Y + BODY_H / 2}
-              x2={BODY_X} y2={BODY_Y + BODY_H / 2}
-          stroke="#9ca3af" strokeWidth="1.5" />
-
-        {/* Cab */}
-        <rect x={CAB_X} y={CAB_Y} width={CAB_W} height={CAB_H}
-          fill="#374151" rx="6" />
-        {/* Windshield */}
-        <rect x={CAB_X + 2} y={CAB_Y + 8} width={16} height={CAB_H - 30}
-          fill="#bfdbfe" rx="3" />
-        {/* Cab roof detail */}
-        <rect x={CAB_X + 5} y={CAB_Y - 6} width={CAB_W - 15} height={8}
-          fill="#1f2937" rx="2" />
-
-        {/* Wheels */}
-        {wheels.map(([wx, wy], i) => (
-          <rect key={i} x={wx} y={wy} width={WW} height={WH}
-            fill="#1f2937" rx="3" />
+        {/* Column numbers */}
+        {Array.from({ length: COLS }, (_, col) => (
+          <text key={col}
+            x={bodyX + PAD + col * (CELL_W + GAP) + CELL_W / 2}
+            y={bodyY + bodyH + 11}
+            textAnchor="middle" fontSize={8} fill="#9ca3af">
+            {col + 1}
+          </text>
         ))}
 
+        {/* Doors (left) */}
+        <rect x={0} y={bodyY + 2} width={DOOR_W} height={bodyH - 4}
+          fill="#374151" rx="2" />
+        <rect x={1} y={bodyY + bodyH / 2 - 6} width={DOOR_W - 2} height={12}
+          fill="#6b7280" rx="1" />
+        <line x1={DOOR_W / 2} y1={bodyY + 4} x2={DOOR_W / 2} y2={bodyY + bodyH - 4}
+          stroke="#9ca3af" strokeWidth="1" />
+
+        {/* Cab (right) */}
+        <rect x={cabX} y={cabY} width={CAB_W} height={CAB_H}
+          fill="#1f2937" rx="5" />
+        {/* Windshield */}
+        <rect x={cabX + 2} y={cabY + 6} width={14} height={CAB_H - 24}
+          fill="#bfdbfe" rx="2" />
+        {/* Cab roof */}
+        <rect x={cabX + 4} y={cabY - 5} width={CAB_W - 12} height={7}
+          fill="#374151" rx="2" />
+
+        {/* Wheels */}
+        {[bodyX + 10, bodyX + bodyW - 10 - wW].map((wx, i) => [
+          <rect key={`wt${i}`} x={wx} y={wY1} width={wW} height={wH} fill="#1f2937" rx="2" />,
+          <rect key={`wb${i}`} x={wx} y={wY2} width={wW} height={wH} fill="#1f2937" rx="2" />,
+        ])}
+        {/* Cab wheel */}
+        <rect x={cabX + 4} y={cabY + CAB_H - 10} width={CAB_W - 10} height={wH}
+          fill="#1f2937" rx="2" />
+
         {/* Direction labels */}
-        <text x={BODY_X - 2} y={BODY_Y - (compact ? 4 : 6)}
-          textAnchor="middle" fontSize={9} fill="#6b7280">← Dveře</text>
-        <text x={CAB_X + CAB_W / 2} y={BODY_Y - (compact ? 4 : 6)}
-          textAnchor="middle" fontSize={9} fill="#6b7280">Kabina →</text>
+        <text x={DOOR_W / 2} y={bodyY - 3} textAnchor="middle" fontSize={8} fill="#6b7280">← Dveře</text>
+        <text x={cabX + CAB_W / 2} y={bodyY - 3} textAnchor="middle" fontSize={8} fill="#6b7280">Kabina →</text>
       </svg>
 
-      {/* Legend — only interactive mode */}
+      {/* Summary */}
       {!readonly && (
-        <div className="flex gap-3 justify-center mt-2 flex-wrap">
-          {TRUCK_ZONES.map(z => (
-            <button key={z.id} type="button" onClick={() => toggle(z.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition active:scale-95 ${
-                zones.includes(z.id)
-                  ? "text-white border-transparent"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
-              }`}
-              style={zones.includes(z.id) ? { backgroundColor: z.color, borderColor: z.color } : {}}>
-              {zones.includes(z.id) ? "✓ " : ""}{z.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between mt-2 text-xs text-gray-500 px-1">
+          <span>Klepněte na políčko pro označení místa</span>
+          <span className={selectedCount > 0 ? "text-green-600 font-semibold" : ""}>
+            {selectedCount > 0 ? `${selectedCount} vybraných` : "Nevybráno"}
+          </span>
         </div>
       )}
-
-      {/* Read-only legend */}
-      {readonly && zones.length > 0 && (
-        <div className="flex gap-2 justify-center mt-1 flex-wrap">
-          {TRUCK_ZONES.filter(z => zones.includes(z.id)).map(z => (
-            <span key={z.id} className="px-2 py-0.5 rounded text-xs font-bold text-white"
-              style={{ backgroundColor: z.color }}>
-              {z.label}
-            </span>
-          ))}
+      {readonly && selectedCount > 0 && (
+        <div className="text-center text-xs text-green-400 mt-1">
+          {selectedCount} preferovaných políček
         </div>
       )}
     </div>
