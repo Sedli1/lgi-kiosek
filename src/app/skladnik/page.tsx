@@ -17,6 +17,8 @@ interface DriverInfo {
   palletCount?: number;
   palletArrangement?: string;
   plombaType?: string;
+  plombaNum?: string;
+  plombaConfirmedAt?: string;
 }
 
 const VEHICLE_LABELS: Record<string, string> = {
@@ -36,10 +38,17 @@ export default function SkladnikPage() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  // Plomba confirmation state
+  const [plombaPin, setPlombaPin] = useState("");
+  const [plombaNum, setPlombaNum] = useState("");
+  const [plombaConfirming, setPlombaConfirming] = useState(false);
+  const [plombaConfirmed, setPlombaConfirmed] = useState(false);
+  const [plombaPinError, setPlombaPinError] = useState("");
+
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus input on load
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   async function handleScan(e: React.FormEvent) {
@@ -50,22 +59,23 @@ export default function SkladnikPage() {
     setDriver(null);
     setPhotos([]);
     setErrMsg("");
+    setPlombaPin("");
+    setPlombaNum("");
+    setPlombaConfirmed(false);
+    setPlombaPinError("");
 
     try {
       const res = await fetch(`/api/verify/${encodeURIComponent(t)}`);
       const data = await res.json() as DriverInfo & { error?: string };
-      if (!res.ok) {
-        setStatus("err");
-        setErrMsg(data.error ?? "Chyba");
-        return;
-      }
-      // Check if driver is on ramp
+      if (!res.ok) { setStatus("err"); setErrMsg(data.error ?? "Chyba"); return; }
       if (data.status !== "ramp") {
         setStatus("err");
         setErrMsg(`Řidič není na rampě (stav: ${data.status})`);
         return;
       }
       setDriver(data);
+      setPlombaNum(data.plombaNum ?? "");
+      setPlombaConfirmed(!!data.plombaConfirmedAt);
       setStatus(data.warehouseConfirmedAt ? "done" : "ok");
     } catch {
       setStatus("err");
@@ -76,19 +86,15 @@ export default function SkladnikPage() {
   async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !driver) return;
-
     setUploading(true);
     try {
-      // Compress image client-side
       const compressed = await compressImage(file, 1200, 0.75);
-      const base64 = compressed.split(",")[1]; // strip data:image/jpeg;base64,
-
+      const base64 = compressed.split(",")[1];
       const res = await fetch(`/api/drivers/${driver.id}/photos`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: token.trim(), photoData: base64 }),
       });
-
       if (res.ok) {
         setPhotos((p) => [...p, compressed]);
       } else {
@@ -125,18 +131,54 @@ export default function SkladnikPage() {
     }
   }
 
+  async function handlePlombaConfirm() {
+    if (!driver) return;
+    if (driver.plombaType === "celni" && !plombaNum.trim()) return;
+    setPlombaConfirming(true);
+    setPlombaPinError("");
+    try {
+      const res = await fetch(`/api/drivers/${driver.id}/plomba`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: token.trim(),
+          pin: plombaPin,
+          plombaNum: plombaNum.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        setPlombaConfirmed(true);
+        setPlombaPin("");
+      } else {
+        const d = await res.json() as { error?: string };
+        if (d.error === "Nesprávný PIN") {
+          setPlombaPinError("Nesprávný PIN, zkuste znovu");
+        } else {
+          alert(d.error ?? "Chyba");
+        }
+      }
+    } catch {
+      alert("Chyba při potvrzování plomby");
+    } finally {
+      setPlombaConfirming(false);
+    }
+  }
+
   function reset() {
     setToken("");
     setDriver(null);
     setStatus("idle");
     setErrMsg("");
     setPhotos([]);
+    setPlombaPin("");
+    setPlombaNum("");
+    setPlombaConfirmed(false);
+    setPlombaPinError("");
     setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
-      {/* Header */}
       <header className="bg-gray-800 px-4 py-3 flex items-center gap-3 border-b border-gray-700">
         <div className="w-8 h-8 rounded-lg bg-[#065A82] flex items-center justify-center text-white font-bold text-sm">S</div>
         <div>
@@ -149,9 +191,7 @@ export default function SkladnikPage() {
 
         {/* Scan form */}
         <form onSubmit={handleScan} className="mb-6">
-          <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">
-            QR kód / ověřovací kód
-          </label>
+          <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">QR kód / ověřovací kód</label>
           <div className="flex gap-2">
             <input
               ref={inputRef}
@@ -185,11 +225,12 @@ export default function SkladnikPage() {
         {/* OK / Done */}
         {(status === "ok" || status === "done") && driver && (
           <div className={`rounded-2xl border-2 p-5 mb-4 ${status === "done" ? "bg-green-900/30 border-green-500" : "bg-gray-800 border-green-400"}`}>
+
             {/* Status banner */}
             <div className={`flex items-center gap-3 mb-4 pb-4 border-b ${status === "done" ? "border-green-700" : "border-gray-700"}`}>
               <div className="text-5xl">{status === "done" ? "✅" : "🟢"}</div>
               <div>
-                <div className={`text-2xl font-black ${status === "done" ? "text-green-400" : "text-green-400"}`}>
+                <div className="text-2xl font-black text-green-400">
                   {status === "done" ? "NAKLÁDKA POTVRZENA" : "SPRÁVNÝ KAMION"}
                 </div>
                 <div className="text-gray-400 text-sm">Rampa {driver.ramp ?? "—"}</div>
@@ -222,14 +263,7 @@ export default function SkladnikPage() {
                 )}
                 {photos.length < 5 && (
                   <>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handlePhoto}
-                      className="hidden"
-                    />
+                    <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} className="hidden" />
                     <button
                       onClick={() => fileRef.current?.click()}
                       disabled={uploading}
@@ -253,21 +287,14 @@ export default function SkladnikPage() {
                     Požadované rozložení palet
                     {driver.palletCount && <span className="ml-2 text-amber-400">({driver.palletCount} pal.)</span>}
                   </div>
-                  <div className="bg-gray-800 rounded-xl p-3">
+                  <div className="bg-gray-900 rounded-xl p-3">
                     <TruckDiagram grid={grid} readonly compact />
                   </div>
                 </div>
               );
             })()}
 
-            {/* Plomba info */}
-            {driver.plombaType && (
-              <div className={`mb-4 px-3 py-2 rounded-lg text-sm font-medium ${driver.plombaType === "celni" ? "bg-purple-900/50 text-purple-300 border border-purple-700" : "bg-gray-700 text-gray-300"}`}>
-                {driver.plombaType === "celni" ? "🛃 Celní plomba — kontaktujte zodpovědnou osobu" : "🔒 Bude plombováno běžnou plombou"}
-              </div>
-            )}
-
-            {/* Confirm button */}
+            {/* Confirm loading button */}
             {status === "ok" && (
               <button
                 onClick={handleConfirm}
@@ -278,14 +305,67 @@ export default function SkladnikPage() {
               </button>
             )}
 
-            {status === "done" && (
-              <div className="mt-2 text-center">
-                <div className="text-green-400 text-sm font-medium mb-3">✅ Nakládka potvrzena</div>
-                {driver.plombaType && (
-                  <div className="text-amber-400 text-xs mb-3">
-                    ⚠ Vyčkejte příchodu plombovačky
+            {/* Plomba section — shown after loading is confirmed */}
+            {status === "done" && driver.plombaType && driver.plombaType !== "zadna" && (
+              <div className={`mt-4 pt-4 border-t ${driver.plombaType === "celni" ? "border-purple-700" : "border-gray-700"}`}>
+                {plombaConfirmed ? (
+                  <div className="text-center py-3">
+                    <div className="text-2xl mb-1">✅</div>
+                    <div className="text-green-400 font-bold text-sm">Plomba potvrzena</div>
                   </div>
+                ) : (
+                  <>
+                    <div className={`flex items-center gap-2 mb-3 text-sm font-bold ${driver.plombaType === "celni" ? "text-purple-300" : "text-gray-300"}`}>
+                      {driver.plombaType === "celni" ? "🛃 Celní plomba" : "🔒 Běžná plomba"}
+                      <span className="font-normal text-gray-500 text-xs">— potvrzení plombovačky</span>
+                    </div>
+
+                    {/* Plomba number (for celni) */}
+                    {driver.plombaType === "celni" && (
+                      <div className="mb-3">
+                        <label className="block text-xs text-gray-400 mb-1">
+                          Číslo plomby
+                          {driver.plombaNum && <span className="ml-1 text-gray-600">(přednastaveno)</span>}
+                        </label>
+                        <input
+                          value={plombaNum}
+                          onChange={e => setPlombaNum(e.target.value)}
+                          placeholder="např. CZ12345678"
+                          className="w-full bg-gray-900 border border-purple-700 rounded-xl px-4 py-3 text-white font-mono text-lg font-bold tracking-widest focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                    )}
+
+                    {/* PIN */}
+                    <div className="mb-3">
+                      <label className="block text-xs text-gray-400 mb-1">PIN plombovačky</label>
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={plombaPin}
+                        onChange={e => { setPlombaPin(e.target.value); setPlombaPinError(""); }}
+                        placeholder="••••"
+                        maxLength={8}
+                        className={`w-full bg-gray-900 border rounded-xl px-4 py-3 text-white text-2xl font-bold tracking-[0.5em] text-center focus:outline-none ${plombaPinError ? "border-red-500" : "border-gray-600 focus:border-gray-400"}`}
+                      />
+                      {plombaPinError && <p className="text-red-400 text-xs mt-1">{plombaPinError}</p>}
+                    </div>
+
+                    <button
+                      onClick={handlePlombaConfirm}
+                      disabled={plombaConfirming || !plombaPin || (driver.plombaType === "celni" && !plombaNum.trim())}
+                      className={`w-full font-bold py-3 rounded-xl transition disabled:opacity-40 text-white ${driver.plombaType === "celni" ? "bg-purple-700 hover:bg-purple-600" : "bg-gray-600 hover:bg-gray-500"}`}
+                    >
+                      {plombaConfirming ? "Ukládám…" : "✓ Potvrdit plombu"}
+                    </button>
+                  </>
                 )}
+              </div>
+            )}
+
+            {/* Done footer */}
+            {status === "done" && (
+              <div className="mt-4 text-center">
                 <button onClick={reset} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-xl transition text-sm">
                   Další kamion →
                 </button>
@@ -307,7 +387,6 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 
-// Compress image client-side before upload
 function compressImage(file: File, maxWidth: number, quality: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

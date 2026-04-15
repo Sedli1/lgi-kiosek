@@ -7,6 +7,9 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "vars": {
+    "PLOMBA_PIN": "1234"
+  },
   "d1_databases": [
     {
       "binding": "DB",

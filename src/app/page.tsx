@@ -211,13 +211,8 @@ export default function KioskPage() {
       const res = await fetch("/api/drivers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (res.ok) {
         const data = (await res.json()) as { id: number; num: number; confirmSms: string };
-        setValues({ name: "", phone: "", spz: "", firm: "", order: "" });
-        setSpzTrailer("");
-        setTypeValue("");
-        setVehicleType("");
-        setPalletGrid(emptyGrid());
-        setTouched(new Set());
-        setConfirmed({ num: data.num, confirmSms: data.confirmSms, driverId: data.id });
+        // Go directly to print page — it auto-prints and shows the ticket number
+        router.push(`/print/${data.id}`);
       }
     } finally {
       setLoading(false);
