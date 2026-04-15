@@ -294,37 +294,33 @@ export default function SkladnikPage() {
               );
             })()}
 
-            {/* Confirm loading button */}
-            {status === "ok" && (
-              <button
-                onClick={handleConfirm}
-                disabled={confirming}
-                className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-4 rounded-xl transition disabled:opacity-50"
-              >
-                {confirming ? "Potvrzuji…" : "✓ Nakládka hotova — uvolnit rampu"}
-              </button>
-            )}
-
-            {/* Plomba section — shown after loading is confirmed */}
-            {status === "done" && driver.plombaType && driver.plombaType !== "zadna" && (
-              <div className={`mt-4 pt-4 border-t ${driver.plombaType === "celni" ? "border-purple-700" : "border-gray-700"}`}>
+            {/* Plomba section — visible during loading (status=ok), must confirm before release */}
+            {status === "ok" && driver.plombaType && driver.plombaType !== "zadna" && (
+              <div className={`mb-4 pt-4 border-t ${driver.plombaType === "celni" ? "border-purple-700" : "border-gray-700"}`}>
                 {plombaConfirmed ? (
-                  <div className="text-center py-3">
-                    <div className="text-2xl mb-1">✅</div>
-                    <div className="text-green-400 font-bold text-sm">Plomba potvrzena</div>
+                  <div className={`flex items-center gap-3 px-4 py-3 rounded-xl ${driver.plombaType === "celni" ? "bg-purple-900/40 border border-purple-700" : "bg-gray-700 border border-gray-600"}`}>
+                    <div className="text-xl">✅</div>
+                    <div>
+                      <div className={`font-bold text-sm ${driver.plombaType === "celni" ? "text-purple-300" : "text-gray-200"}`}>
+                        Plomba potvrzena
+                      </div>
+                      {driver.plombaType === "celni" && plombaNum && (
+                        <div className="text-xs text-gray-400 font-mono">{plombaNum}</div>
+                      )}
+                    </div>
                   </div>
                 ) : (
-                  <>
-                    <div className={`flex items-center gap-2 mb-3 text-sm font-bold ${driver.plombaType === "celni" ? "text-purple-300" : "text-gray-300"}`}>
+                  <div className={`rounded-xl border p-4 ${driver.plombaType === "celni" ? "border-purple-700 bg-purple-950/30" : "border-gray-600 bg-gray-900/50"}`}>
+                    <div className={`text-sm font-bold mb-3 ${driver.plombaType === "celni" ? "text-purple-300" : "text-gray-300"}`}>
                       {driver.plombaType === "celni" ? "🛃 Celní plomba" : "🔒 Běžná plomba"}
-                      <span className="font-normal text-gray-500 text-xs">— potvrzení plombovačky</span>
+                      <span className="ml-2 font-normal text-xs text-gray-500">— plombovačka musí potvrdit před odjezdem</span>
                     </div>
 
-                    {/* Plomba number (for celni) */}
+                    {/* Seal number (celni only) */}
                     {driver.plombaType === "celni" && (
                       <div className="mb-3">
                         <label className="block text-xs text-gray-400 mb-1">
-                          Číslo plomby
+                          Číslo celní plomby
                           {driver.plombaNum && <span className="ml-1 text-gray-600">(přednastaveno)</span>}
                         </label>
                         <input
@@ -348,7 +344,7 @@ export default function SkladnikPage() {
                         maxLength={8}
                         className={`w-full bg-gray-900 border rounded-xl px-4 py-3 text-white text-2xl font-bold tracking-[0.5em] text-center focus:outline-none ${plombaPinError ? "border-red-500" : "border-gray-600 focus:border-gray-400"}`}
                       />
-                      {plombaPinError && <p className="text-red-400 text-xs mt-1">{plombaPinError}</p>}
+                      {plombaPinError && <p className="text-red-400 text-xs mt-1 text-center">{plombaPinError}</p>}
                     </div>
 
                     <button
@@ -358,14 +354,31 @@ export default function SkladnikPage() {
                     >
                       {plombaConfirming ? "Ukládám…" : "✓ Potvrdit plombu"}
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
             )}
 
-            {/* Done footer */}
+            {/* Confirm loading button — blocked until plomba confirmed (if required) */}
+            {status === "ok" && (() => {
+              const needsPlomba = !!driver.plombaType && driver.plombaType !== "zadna";
+              const blocked = needsPlomba && !plombaConfirmed;
+              return (
+                <button
+                  onClick={handleConfirm}
+                  disabled={confirming || blocked}
+                  title={blocked ? "Nejprve potvrďte plombu" : undefined}
+                  className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-4 rounded-xl transition disabled:opacity-40"
+                >
+                  {confirming ? "Potvrzuji…" : blocked ? "🔒 Čeká na potvrzení plomby…" : "✓ Nakládka hotova — uvolnit rampu"}
+                </button>
+              );
+            })()}
+
+            {/* Done */}
             {status === "done" && (
-              <div className="mt-4 text-center">
+              <div className="mt-2 text-center">
+                <div className="text-green-400 text-sm font-medium mb-3">✅ Nakládka potvrzena</div>
                 <button onClick={reset} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-xl transition text-sm">
                   Další kamion →
                 </button>

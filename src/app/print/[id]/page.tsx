@@ -51,8 +51,11 @@ export default function PrintPage() {
         margin: 2,
         color: { dark: "#000000", light: "#ffffff" },
       }).then(() => {
-        // Short delay so the browser paints before print dialog opens
-        setTimeout(() => window.print(), 300);
+        setTimeout(() => {
+          window.print();
+          // If opened as popup from kiosk, close after print dialog dismisses
+          if (window.opener) setTimeout(() => window.close(), 500);
+        }, 300);
       });
     });
   }, [driver]);

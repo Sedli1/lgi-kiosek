@@ -211,8 +211,9 @@ export default function KioskPage() {
       const res = await fetch("/api/drivers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (res.ok) {
         const data = (await res.json()) as { id: number; num: number; confirmSms: string };
-        // Go directly to print page — it auto-prints and shows the ticket number
-        router.push(`/print/${data.id}`);
+        // Open print in new window (auto-prints, auto-closes) — kiosk resets immediately
+        window.open(`/print/${data.id}`, "_blank");
+        resetAll();
       }
     } finally {
       setLoading(false);
