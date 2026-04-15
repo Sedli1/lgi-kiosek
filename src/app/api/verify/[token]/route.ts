@@ -32,5 +32,8 @@ export async function GET(
     status: driver.status,
     warehouseConfirmedAt: driver.warehouseConfirmedAt,
     num: driver.num,
+    palletCount: driver.palletCount,
+    palletArrangement: driver.palletArrangement,
+    plombaType: driver.plombaType,
   });
 }

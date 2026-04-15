@@ -3,25 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { T, Lang } from "@/lib/i18n";
+import { TruckDiagram, type ZoneId } from "@/components/TruckDiagram";
 
 // ── Types ─────────────────────────────────────────────────
 
 interface ConfirmData { num: number; confirmSms: string; driverId: number; }
 type FormField = "name" | "phone" | "spz" | "firm" | "order";
-
-const ARRANGEMENT_OPTIONS = [
-  { value: "dvere",    label: "Blíže k dveřím",   desc: "Naložit jako první" },
-  { value: "stred",   label: "Uprostřed",         desc: "Rovnoměrně ve středu" },
-  { value: "kabina",  label: "Blíže ke kabině",   desc: "Naložit jako poslední" },
-  { value: "rovnom",  label: "Rovnoměrně",         desc: "Rozmístit rovnoměrně" },
-  { value: "jedno",   label: "Je mi to jedno",    desc: "Nechat na skladníkovi" },
-] as const;
-
-// Grid: 2 wide × 8 deep = 16 positions, 0=empty 1=zóna A (dveře) 2=zóna B (střed) 3=zóna C (kabina)
-const GRID_ROWS = 8;
-const GRID_COLS = 2;
-const ZONE_COLORS = ["bg-gray-700", "bg-green-500", "bg-amber-400", "bg-blue-500"];
-const ZONE_LABELS = ["—", "Dveře", "Střed", "Kabina"];
 
 const VEHICLE_TYPES = [
   { value: "tahac_navis", label: "Tahač + návěs", emoji: "🚛" },
@@ -108,9 +95,7 @@ export default function KioskPage() {
   const [dialCode, setDialCode] = useState("+420");
   const [typeValue, setTypeValue] = useState("");
   const [vehicleType, setVehicleType] = useState("");
-  const [arrangement, setArrangement] = useState("");
-  const [gridMode, setGridMode] = useState(false);
-  const [grid, setGrid] = useState<number[]>(Array(GRID_ROWS * GRID_COLS).fill(0));
+  const [palletZones, setPalletZones] = useState<ZoneId[]>([]);
   const [touched, setTouched] = useState<Set<FormField>>(new Set());
   const [countdown, setCountdown] = useState(RESET_SECONDS);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -172,9 +157,7 @@ export default function KioskPage() {
     setSpzTrailer("");
     setTypeValue("");
     setVehicleType("");
-    setArrangement("");
-    setGridMode(false);
-    setGrid(Array(GRID_ROWS * GRID_COLS).fill(0));
+    setPalletZones([]);
     setTouched(new Set());
   }
 
@@ -211,9 +194,8 @@ export default function KioskPage() {
     setLoading(true);
 
     const phone = values.phone.startsWith("+") ? values.phone : `${dialCode}${values.phone}`;
-    const palletGrid = gridMode ? JSON.stringify(grid) : undefined;
-    const palletArrangement = gridMode ? undefined : (arrangement || undefined);
-    const payload = { name: values.name.trim(), phone, spz: values.spz.trim(), spzTrailer: spzTrailer.trim() || undefined, firm: values.firm.trim(), order: values.order.trim(), type: typeValue, lang, vehicleType: vehicleType || undefined, palletArrangement, palletGrid };
+    const palletArrangement = palletZones.length > 0 ? JSON.stringify(palletZones) : undefined;
+    const payload = { name: values.name.trim(), phone, spz: values.spz.trim(), spzTrailer: spzTrailer.trim() || undefined, firm: values.firm.trim(), order: values.order.trim(), type: typeValue, lang, vehicleType: vehicleType || undefined, palletArrangement };
 
     if (!navigator.onLine) {
       const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) ?? "[]");
@@ -572,72 +554,14 @@ export default function KioskPage() {
 
           {/* Pallet arrangement — only for loading types */}
           {(typeValue === "naklada" || typeValue === "obe") && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-semibold text-gray-700">Rozložení palet v kamionu</label>
-                <button
-                  type="button"
-                  onClick={() => setGridMode(g => !g)}
-                  className="text-xs text-[#065A82] underline"
-                >
-                  {gridMode ? "Jednoduché" : "Mřížka"}
-                </button>
-              </div>
-
-              {!gridMode ? (
-                <div className="grid grid-cols-1 gap-2">
-                  {ARRANGEMENT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setArrangement(opt.value)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition active:scale-[0.99] text-left ${
-                        arrangement === opt.value
-                          ? "bg-[#065A82] text-white border-[#065A82]"
-                          : "bg-white text-gray-700 border-gray-200 hover:border-[#065A82]"
-                      }`}
-                    >
-                      <div className="flex-1">
-                        <div className="font-semibold text-sm">{opt.label}</div>
-                        <div className={`text-xs ${arrangement === opt.value ? "text-blue-200" : "text-gray-400"}`}>{opt.desc}</div>
-                      </div>
-                      {arrangement === opt.value && <span className="text-white">✓</span>}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div>
-                  <div className="flex justify-between text-xs text-gray-400 mb-1 px-1">
-                    <span>← Dveře (nakládá se první)</span>
-                    <span>Kabina →</span>
-                  </div>
-                  <div className="bg-gray-100 rounded-xl p-3">
-                    <div
-                      className="grid gap-1.5"
-                      style={{ gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)` }}
-                    >
-                      {grid.map((cell, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setGrid(g => { const n=[...g]; n[i]=(n[i]+1)%4; return n; })}
-                          className={`h-10 rounded-lg border-2 border-white/50 transition active:scale-95 text-xs font-bold text-white ${ZONE_COLORS[cell]}`}
-                        >
-                          {cell > 0 ? ZONE_LABELS[cell] : ""}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex gap-3 mt-2 justify-center text-xs text-gray-500">
-                      {[1,2,3].map(z => (
-                        <span key={z} className="flex items-center gap-1">
-                          <span className={`w-3 h-3 rounded ${ZONE_COLORS[z]} inline-block`} />
-                          {ZONE_LABELS[z]}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="text-xs text-gray-400 text-center mt-1">Tapněte políčko pro přiřazení zóny</p>
-                  </div>
-                </div>
+            <div className="bg-gray-50 rounded-2xl p-4 border border-gray-200">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Kde chcete umístit náklad?
+              </label>
+              <p className="text-xs text-gray-400 mb-3">Klepněte na zónu v kamionu (lze vybrat více)</p>
+              <TruckDiagram zones={palletZones} onChange={setPalletZones} />
+              {palletZones.length === 0 && (
+                <p className="text-xs text-center text-gray-400 mt-2">Nevybráno — skladník rozhodne sám</p>
               )}
             </div>
           )}

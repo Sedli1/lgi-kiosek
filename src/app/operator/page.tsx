@@ -183,6 +183,8 @@ export default function OperatorPage() {
   const [selectedRamp, setSelectedRamp] = useState("1");
   const [selectedTime, setSelectedTime] = useState(nowTime());
   const [selectedPalletCount, setSelectedPalletCount] = useState("");
+  const [selectedPlomba, setSelectedPlomba] = useState<"" | "zadna" | "bezna" | "celni">("");
+  const [selectedPlombaNum, setSelectedPlombaNum] = useState("");
   const [rampConflict, setRampConflict] = useState<Driver | null>(null);
   const [sending, setSending] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -441,11 +443,16 @@ export default function OperatorPage() {
     if (!rampModal) return;
     setSending(true);
     const palletCount = selectedPalletCount ? Number(selectedPalletCount) : undefined;
+    const plombaPayload = selectedPlomba && selectedPlomba !== "zadna" ? {
+      plombaType: selectedPlomba,
+      plombaNum: selectedPlomba === "celni" ? selectedPlombaNum : undefined,
+    } : {};
     await fetch(`/api/drivers/${rampModal.id}/ramp`, {
       method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime, skipSms, palletCount }),
+      body: JSON.stringify({ ramp: selectedRamp, rampTime: selectedTime, skipSms, palletCount, ...plombaPayload }),
     });
-    setSending(false); setRampModal(null); setRampConflict(null); setSkipSms(false); setSelectedPalletCount("");
+    setSending(false); setRampModal(null); setRampConflict(null); setSkipSms(false);
+    setSelectedPalletCount(""); setSelectedPlomba(""); setSelectedPlombaNum("");
   }
 
   async function cancelDriver(id: number) {
@@ -1563,6 +1570,24 @@ export default function OperatorPage() {
                   placeholder="—"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-[#065A82]"/>
               </div>
+            </div>
+
+            {/* Plomba */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Plombování</label>
+              <div className="flex gap-2 flex-wrap">
+                {(["zadna","bezna","celni"] as const).map(p => (
+                  <button key={p} type="button" onClick={() => setSelectedPlomba(p)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border-2 transition ${selectedPlomba === p ? "bg-[#065A82] text-white border-[#065A82]" : "bg-white text-gray-600 border-gray-200 hover:border-[#065A82]"}`}>
+                    {p === "zadna" ? "Žádná" : p === "bezna" ? "🔒 Běžná" : "🛃 Celní"}
+                  </button>
+                ))}
+              </div>
+              {selectedPlomba === "celni" && (
+                <input value={selectedPlombaNum} onChange={e => setSelectedPlombaNum(e.target.value)}
+                  placeholder="Číslo celní plomby…"
+                  className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#065A82]" />
+              )}
             </div>
 
             {rampConflict && (

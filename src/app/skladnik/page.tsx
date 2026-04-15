@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { TruckDiagram, type ZoneId } from "@/components/TruckDiagram";
 
 interface DriverInfo {
   id: number;
@@ -13,6 +14,9 @@ interface DriverInfo {
   ramp?: string;
   status: string;
   warehouseConfirmedAt?: string;
+  palletCount?: number;
+  palletArrangement?: string;
+  plombaType?: string;
 }
 
 const VEHICLE_LABELS: Record<string, string> = {
@@ -32,10 +36,6 @@ export default function SkladnikPage() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [plombaType, setPlombaType] = useState<"bezna" | "celni" | "">("");
-  const [plombaNum, setPlombaNum] = useState("");
-  const [plombaSending, setPlombaSending] = useState(false);
-  const [plombaDone, setPlombaDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -125,35 +125,12 @@ export default function SkladnikPage() {
     }
   }
 
-  async function handlePlomba() {
-    if (!driver || !plombaType) return;
-    if (plombaType === "celni" && !plombaNum.trim()) return;
-    setPlombaSending(true);
-    try {
-      const res = await fetch(`/api/drivers/${driver.id}/plomba`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token.trim(), plombaType, plombaNum: plombaNum.trim() || undefined }),
-      });
-      if (res.ok) {
-        setPlombaDone(true);
-      } else {
-        const d = await res.json() as { error?: string };
-        alert(d.error ?? "Chyba");
-      }
-    } catch { alert("Chyba při ukládání plomby"); }
-    finally { setPlombaSending(false); }
-  }
-
   function reset() {
     setToken("");
     setDriver(null);
     setStatus("idle");
     setErrMsg("");
     setPhotos([]);
-    setPlombaType("");
-    setPlombaNum("");
-    setPlombaDone(false);
     setTimeout(() => inputRef.current?.focus(), 100);
   }
 
@@ -265,6 +242,31 @@ export default function SkladnikPage() {
               </div>
             )}
 
+            {/* Pallet arrangement */}
+            {driver.palletArrangement && (() => {
+              let zones: ZoneId[] = [];
+              try { zones = JSON.parse(driver.palletArrangement) as ZoneId[]; } catch {}
+              if (zones.length === 0) return null;
+              return (
+                <div className="mb-4 pt-4 border-t border-gray-700">
+                  <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">
+                    Požadované rozložení palet
+                    {driver.palletCount && <span className="ml-2 text-amber-400">({driver.palletCount} pal.)</span>}
+                  </div>
+                  <div className="bg-gray-800 rounded-xl p-3">
+                    <TruckDiagram zones={zones} readonly compact />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Plomba info */}
+            {driver.plombaType && (
+              <div className={`mb-4 px-3 py-2 rounded-lg text-sm font-medium ${driver.plombaType === "celni" ? "bg-purple-900/50 text-purple-300 border border-purple-700" : "bg-gray-700 text-gray-300"}`}>
+                {driver.plombaType === "celni" ? "🛃 Celní plomba — kontaktujte zodpovědnou osobu" : "🔒 Bude plombováno běžnou plombou"}
+              </div>
+            )}
+
             {/* Confirm button */}
             {status === "ok" && (
               <button
@@ -276,52 +278,18 @@ export default function SkladnikPage() {
               </button>
             )}
 
-            {/* Plomba step — appears after loading confirmed */}
-            {status === "done" && !plombaDone && (
-              <div className="mt-4 pt-4 border-t border-gray-700">
-                <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">🔒 Plombování</div>
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <button
-                    onClick={() => setPlombaType("bezna")}
-                    className={`py-4 rounded-xl border-2 font-bold transition text-sm ${plombaType === "bezna" ? "bg-green-600 text-white border-green-600" : "bg-gray-700 text-gray-300 border-gray-600 hover:border-green-500"}`}
-                  >
-                    🔒<br />Běžná plomba
-                  </button>
-                  <button
-                    onClick={() => setPlombaType("celni")}
-                    className={`py-4 rounded-xl border-2 font-bold transition text-sm ${plombaType === "celni" ? "bg-purple-600 text-white border-purple-600" : "bg-gray-700 text-gray-300 border-gray-600 hover:border-purple-500"}`}
-                  >
-                    🛃<br />Celní plomba
-                  </button>
-                </div>
-                {plombaType === "celni" && (
-                  <input
-                    value={plombaNum}
-                    onChange={e => setPlombaNum(e.target.value)}
-                    placeholder="Číslo celní plomby…"
-                    className="w-full bg-gray-800 border border-gray-600 rounded-xl px-4 py-3 text-white font-mono text-sm mb-3 focus:outline-none focus:border-purple-500"
-                  />
+            {status === "done" && (
+              <div className="mt-2 text-center">
+                <div className="text-green-400 text-sm font-medium mb-3">✅ Nakládka potvrzena</div>
+                {driver.plombaType && (
+                  <div className="text-amber-400 text-xs mb-3">
+                    ⚠ Vyčkejte příchodu plombovačky
+                  </div>
                 )}
-                <button
-                  onClick={handlePlomba}
-                  disabled={!plombaType || (plombaType === "celni" && !plombaNum.trim()) || plombaSending}
-                  className="w-full bg-amber-500 hover:bg-amber-400 text-white font-bold py-3 rounded-xl transition disabled:opacity-40"
-                >
-                  {plombaSending ? "Ukládám…" : "Potvrdit plombu"}
+                <button onClick={reset} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-xl transition text-sm">
+                  Další kamion →
                 </button>
               </div>
-            )}
-
-            {status === "done" && plombaDone && (
-              <div className="mt-3 text-center text-green-400 text-sm font-medium">
-                ✅ Plomba zaznamenána
-              </div>
-            )}
-
-            {status === "done" && (
-              <button onClick={reset} className="w-full mt-3 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-xl transition text-sm">
-                Další kamion →
-              </button>
             )}
           </div>
         )}
