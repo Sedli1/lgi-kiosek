@@ -37,5 +37,7 @@ export async function GET(
     plombaType: driver.plombaType,
     plombaNum: driver.plombaNum,
     plombaConfirmedAt: driver.plombaConfirmedAt,
+    rampAssignedAt: driver.rampAssignedAt,
+    loadingStartedAt: driver.loadingStartedAt,
   });
 }

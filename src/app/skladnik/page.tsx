@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { TruckDiagram, type GridState } from "@/components/TruckDiagram";
 
 interface DriverInfo {
@@ -19,6 +19,8 @@ interface DriverInfo {
   plombaType?: string;
   plombaNum?: string;
   plombaConfirmedAt?: string;
+  rampAssignedAt?: string;
+  loadingStartedAt?: string;
 }
 
 const VEHICLE_LABELS: Record<string, string> = {
@@ -30,6 +32,31 @@ const VEHICLE_LABELS: Record<string, string> = {
   jine: "Jiné",
 };
 
+function playBeep() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+  } catch {}
+}
+
+function formatElapsed(fromIso: string): string {
+  const secs = Math.floor((Date.now() - new Date(fromIso).getTime()) / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 export default function SkladnikPage() {
   const [token, setToken] = useState("");
   const [driver, setDriver] = useState<DriverInfo | null>(null);
@@ -38,18 +65,38 @@ export default function SkladnikPage() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [scanFlash, setScanFlash] = useState(false);
 
-  // Plomba confirmation state
+  // Plomba
   const [plombaPin, setPlombaPin] = useState("");
   const [plombaNum, setPlombaNum] = useState("");
   const [plombaConfirming, setPlombaConfirming] = useState(false);
   const [plombaConfirmed, setPlombaConfirmed] = useState(false);
   const [plombaPinError, setPlombaPinError] = useState("");
 
+  // Loading start
+  const [loadingStartedAt, setLoadingStartedAt] = useState<string | null>(null);
+  const [startingLoading, setStartingLoading] = useState(false);
+
+  // Elapsed timers
+  const [, setTick] = useState(0);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Tick every second when we have timestamps to show
+  useEffect(() => {
+    if (!driver?.rampAssignedAt && !loadingStartedAt) return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [driver?.rampAssignedAt, loadingStartedAt]);
+
+  const triggerFlash = useCallback(() => {
+    setScanFlash(true);
+    setTimeout(() => setScanFlash(false), 600);
+  }, []);
 
   async function handleScan(e: React.FormEvent) {
     e.preventDefault();
@@ -63,6 +110,7 @@ export default function SkladnikPage() {
     setPlombaNum("");
     setPlombaConfirmed(false);
     setPlombaPinError("");
+    setLoadingStartedAt(null);
 
     try {
       const res = await fetch(`/api/verify/${encodeURIComponent(t)}`);
@@ -76,10 +124,36 @@ export default function SkladnikPage() {
       setDriver(data);
       setPlombaNum(data.plombaNum ?? "");
       setPlombaConfirmed(!!data.plombaConfirmedAt);
+      setLoadingStartedAt(data.loadingStartedAt ?? null);
+      playBeep();
+      triggerFlash();
       setStatus(data.warehouseConfirmedAt ? "done" : "ok");
     } catch {
       setStatus("err");
       setErrMsg("Nepodařilo se ověřit");
+    }
+  }
+
+  async function handleStartLoading() {
+    if (!driver) return;
+    setStartingLoading(true);
+    try {
+      const res = await fetch(`/api/drivers/${driver.id}/loading-start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+      if (res.ok) {
+        const d = await res.json() as { loadingStartedAt: string };
+        setLoadingStartedAt(d.loadingStartedAt);
+      } else {
+        const d = await res.json() as { error?: string };
+        alert(d.error ?? "Chyba");
+      }
+    } catch {
+      alert("Chyba při spuštění nakládky");
+    } finally {
+      setStartingLoading(false);
     }
   }
 
@@ -174,11 +248,12 @@ export default function SkladnikPage() {
     setPlombaNum("");
     setPlombaConfirmed(false);
     setPlombaPinError("");
+    setLoadingStartedAt(null);
     setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+    <div className={`min-h-screen bg-gray-900 text-white flex flex-col transition-colors duration-300 ${scanFlash ? "bg-green-900" : ""}`}>
       <header className="bg-gray-800 px-4 py-3 flex items-center gap-3 border-b border-gray-700">
         <div className="w-8 h-8 rounded-lg bg-[#065A82] flex items-center justify-center text-white font-bold text-sm">S</div>
         <div>
@@ -195,6 +270,7 @@ export default function SkladnikPage() {
           <div className="flex gap-2">
             <input
               ref={inputRef}
+              autoFocus
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Naskenujte nebo zadejte kód…"
@@ -229,13 +305,43 @@ export default function SkladnikPage() {
             {/* Status banner */}
             <div className={`flex items-center gap-3 mb-4 pb-4 border-b ${status === "done" ? "border-green-700" : "border-gray-700"}`}>
               <div className="text-5xl">{status === "done" ? "✅" : "🟢"}</div>
-              <div>
+              <div className="flex-1">
                 <div className="text-2xl font-black text-green-400">
                   {status === "done" ? "NAKLÁDKA POTVRZENA" : "SPRÁVNÝ KAMION"}
                 </div>
                 <div className="text-gray-400 text-sm">Rampa {driver.ramp ?? "—"}</div>
               </div>
+              {/* Waiting time */}
+              {driver.rampAssignedAt && (
+                <div className="text-right">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Čeká</div>
+                  <div className="text-lg font-bold text-amber-400">{formatElapsed(driver.rampAssignedAt)}</div>
+                </div>
+              )}
             </div>
+
+            {/* Loading started / timer */}
+            {status === "ok" && (
+              <div className="mb-4">
+                {loadingStartedAt ? (
+                  <div className="flex items-center gap-3 bg-blue-900/40 border border-blue-700 rounded-xl px-4 py-3">
+                    <div className="text-2xl">⏱</div>
+                    <div>
+                      <div className="text-xs text-blue-400 uppercase tracking-wide">Nakládka probíhá</div>
+                      <div className="text-xl font-bold text-white">{formatElapsed(loadingStartedAt)}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleStartLoading}
+                    disabled={startingLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black text-lg py-4 rounded-xl transition disabled:opacity-50"
+                  >
+                    {startingLoading ? "Spouštím…" : "▶ Spustit nakládání"}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Driver details */}
             <div className="space-y-2 text-sm mb-4">
@@ -276,7 +382,7 @@ export default function SkladnikPage() {
               </div>
             )}
 
-            {/* Pallet arrangement */}
+            {/* Pallet arrangement — larger, no compact */}
             {driver.palletArrangement && (() => {
               let grid: GridState = [];
               try { grid = JSON.parse(driver.palletArrangement) as GridState; } catch {}
@@ -288,13 +394,13 @@ export default function SkladnikPage() {
                     {driver.palletCount && <span className="ml-2 text-amber-400">({driver.palletCount} pal.)</span>}
                   </div>
                   <div className="bg-gray-900 rounded-xl p-3">
-                    <TruckDiagram grid={grid} readonly compact />
+                    <TruckDiagram grid={grid} readonly />
                   </div>
                 </div>
               );
             })()}
 
-            {/* Plomba section — visible during loading (status=ok), must confirm before release */}
+            {/* Plomba section */}
             {status === "ok" && driver.plombaType && driver.plombaType !== "zadna" && (
               <div className={`mb-4 pt-4 border-t ${driver.plombaType === "celni" ? "border-purple-700" : "border-gray-700"}`}>
                 {plombaConfirmed ? (
@@ -316,7 +422,6 @@ export default function SkladnikPage() {
                       <span className="ml-2 font-normal text-xs text-gray-500">— plombovačka musí potvrdit před odjezdem</span>
                     </div>
 
-                    {/* Seal number (celni only) */}
                     {driver.plombaType === "celni" && (
                       <div className="mb-3">
                         <label className="block text-xs text-gray-400 mb-1">
@@ -332,7 +437,6 @@ export default function SkladnikPage() {
                       </div>
                     )}
 
-                    {/* PIN */}
                     <div className="mb-3">
                       <label className="block text-xs text-gray-400 mb-1">PIN plombovačky</label>
                       <input
@@ -359,7 +463,7 @@ export default function SkladnikPage() {
               </div>
             )}
 
-            {/* Confirm loading button — blocked until plomba confirmed (if required) */}
+            {/* Confirm loading button */}
             {status === "ok" && (() => {
               const needsPlomba = !!driver.plombaType && driver.plombaType !== "zadna";
               const blocked = needsPlomba && !plombaConfirmed;
@@ -379,7 +483,7 @@ export default function SkladnikPage() {
             {status === "done" && (
               <div className="mt-2 text-center">
                 <div className="text-green-400 text-sm font-medium mb-3">✅ Nakládka potvrzena</div>
-                <button onClick={reset} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-xl transition text-sm">
+                <button onClick={reset} className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl transition text-lg">
                   Další kamion →
                 </button>
               </div>

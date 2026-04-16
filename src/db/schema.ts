@@ -26,6 +26,7 @@ export const drivers = sqliteTable("Driver", {
   plombaType: text("plombaType"),
   plombaNum: text("plombaNum"),
   plombaConfirmedAt: text("plombaConfirmedAt"),
+  loadingStartedAt: text("loadingStartedAt"),
   note: text("note"),
   createdAt: text("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updatedAt").notNull().default(sql`CURRENT_TIMESTAMP`),
